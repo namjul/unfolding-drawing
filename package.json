@@ -1,0 +1,40 @@
+{
+  "name": "unfolding-drawing-app",
+  "version": "1.0.0",
+  "main": "dist/index.html",
+  "pear": {
+    "name": "unfolding-drawing-app",
+    "type": "desktop",
+    "gui": {
+      "backgroundColor": "#1F2430",
+      "height": "540",
+      "width": "720"
+    }
+  },
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rsbuild build",
+    "build:watch": "rsbuild build --watch",
+    "check": "biome check --write",
+    "format": "biome format --write",
+    "preview": "rsbuild preview",
+    "dev": "rsbuild dev",
+    "dev:pear": "pear run -d .",
+    "test": "brittle test/*.test.js"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.3",
+    "@rsbuild/core": "^1.5.6",
+    "typescript": "^5.9.2",
+    "brittle": "^3.0.0",
+    "pear-interface": "^1.0.0"
+  },
+  "dependencies": {
+    "@evolu/common": "^6.0.1-preview.19",
+    "@evolu/web": "^1.0.1-preview.5",
+    "@zag-js/core": "^1.24.2",
+    "@zag-js/tooltip": "^1.24.2",
+    "spellcaster": "^6.0.0"
+  }
+}
