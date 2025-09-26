@@ -14,21 +14,24 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "rsbuild build",
-    "build:watch": "rsbuild build --watch",
+    "dev:rsbuild": "rsbuild build --mode development",
+    "dev": "npm-run-all --parallel \"dev:**\"",
+    "prod:rsbuild": "rsbuild build --mode production",
+    "prod": "npm-run-all --parallel \"prod:**\"",
+    "watch:rsbuild": "npm run dev:rsbuild -- --watch",
+    "watch": "run-p \"watch:**\"",
+    "start": "pear run -d .",
     "check": "biome check --write",
     "format": "biome format --write",
-    "preview": "rsbuild preview",
-    "dev": "rsbuild dev",
-    "dev:pear": "pear run -d .",
     "test": "brittle test/*.test.js"
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.3",
     "@rsbuild/core": "^1.5.6",
-    "typescript": "^5.9.2",
     "brittle": "^3.0.0",
-    "pear-interface": "^1.0.0"
+    "npm-run-all": "^4.1.5",
+    "pear-interface": "^1.0.0",
+    "typescript": "^5.9.2"
   },
   "dependencies": {
     "@evolu/common": "^6.0.1-preview.19",

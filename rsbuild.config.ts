@@ -4,7 +4,10 @@ export default defineConfig({
   output: {
     assetPrefix: './',
   },
+  dev: {
+    assetPrefix: './',
+  },
   server: {
-    open: false
+    open: false,
   },
 });
