@@ -1,7 +1,7 @@
 {
   "name": "unfolding-drawing-app",
   "version": "1.0.0",
-  "main": "dist/index.html",
+  "main": "index.html",
   "pear": {
     "name": "unfolding-drawing-app",
     "type": "desktop",
@@ -38,6 +38,9 @@
     "@evolu/web": "^1.0.1-preview.5",
     "@zag-js/core": "^1.24.2",
     "@zag-js/tooltip": "^1.24.2",
+    "b4a": "^1.7.3",
+    "hypercore-crypto": "^3.6.1",
+    "hyperswarm": "^4.14.0",
     "spellcaster": "^6.0.0"
   }
 }
