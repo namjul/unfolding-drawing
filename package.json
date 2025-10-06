@@ -15,10 +15,13 @@
   "type": "module",
   "scripts": {
     "dev:rsbuild": "rsbuild build --mode development",
+    "dev:tailwind": "npx @tailwindcss/cli -i ./src/index.css -o ./dist/output.css",
     "dev": "npm-run-all --parallel \"dev:**\"",
     "prod:rsbuild": "rsbuild build --mode production",
+    "prod:tailwind": "npm run dev:tailwind -- --minify",
     "prod": "npm-run-all --parallel \"prod:**\"",
     "watch:rsbuild": "npm run dev:rsbuild -- --watch",
+    "watch:tailwind": "npm run dev:tailwind -- --watch",
     "watch": "run-p \"watch:**\"",
     "start": "pear run -d .",
     "check": "biome check --write",
@@ -36,11 +39,13 @@
   "dependencies": {
     "@evolu/common": "^6.0.1-preview.19",
     "@evolu/web": "^1.0.1-preview.5",
+    "@tailwindcss/cli": "^4.1.14",
     "@zag-js/core": "^1.24.2",
     "@zag-js/tooltip": "^1.24.2",
     "b4a": "^1.7.3",
     "hypercore-crypto": "^3.6.1",
     "hyperswarm": "^4.14.0",
-    "spellcaster": "^6.0.0"
+    "spellcaster": "^6.0.0",
+    "tailwindcss": "^4.1.14"
   }
 }

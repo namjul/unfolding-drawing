@@ -3,8 +3,6 @@ import b4a from 'b4a' // Module for buffer-to-string and vice-versa conversions
 import { signal, always } from 'spellcaster/spellcaster.js'
 import { tag, text, css, component, h } from 'spellcaster/hyperscript.js'
 
-import './index.css';
-
 export default async function (app: any) {
 
   console.log(app);
