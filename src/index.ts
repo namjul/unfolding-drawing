@@ -2,6 +2,7 @@
 import b4a from 'b4a' // Module for buffer-to-string and vice-versa conversions
 import { signal, always } from 'spellcaster/spellcaster.js'
 import { tag, text, css, component, h } from 'spellcaster/hyperscript.js'
+import * as fabric from 'fabric'
 
 export default async function (app: any) {
 
@@ -39,25 +40,29 @@ export default async function (app: any) {
   })
 
   const div = tag('div')
-  const button = tag('button')
 
-  const Counter = () => {
-    const [count, setCount] = signal(0)
+  const canvas = h('canvas') as HTMLCanvasElement
+  setTimeout(() => {
+    const fabricCanvas = new fabric.Canvas(canvas, {
+      isDrawingMode: true
+    });
 
+    fabricCanvas.freeDrawingBrush = new fabric.PencilBrush(fabricCanvas);
+
+
+    fabricCanvas.on('after:render', (e) => {
+      console.log("path:created")
+    });
+
+  })
+
+  const App = () => {
     return div(
-      { className: 'content' },
+      { className: 'flex gap-2 h-screen p-2' },
       [
-        div({ className: 'counter-text' }, text(count)),
-        button(
-          {
-            className: 'counter-button',
-            onclick: () => {
-              send("Hello world")
-              setCount(count() + 1)
-            }
-          },
-          text('Increment')
-        ),
+        div({ className: 'p-2 basis-1/25 grow max-w-100 bg-sky-50' }, ['View Controls']),
+        div({ className: 'p-2 basis-1/5 grow  bg-sky-50' }, [canvas]),
+        div({ className: 'p-2 basis-1/25 grow max-w-100  bg-sky-50' }, ['Transformation Controls']),
       ]
     )
 
@@ -67,6 +72,6 @@ export default async function (app: any) {
 
 
   if (rootEl) {
-    rootEl.append(Counter())
+    rootEl.append(App())
   }
 }
