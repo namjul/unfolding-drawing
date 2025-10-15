@@ -1,15 +1,26 @@
 import { defineConfig } from '@rsbuild/core';
+import { pluginBabel } from '@rsbuild/plugin-babel';
+import { pluginSolid } from '@rsbuild/plugin-solid';
+import tailwindcss from '@tailwindcss/postcss';
 
 export default defineConfig({
-  output: {
-    target: 'node',
-    module: true,
-    assetPrefix: './',
+  plugins: [
+    pluginBabel({
+      include: /\.(?:jsx|tsx)$/,
+    }),
+    pluginSolid(),
+  ],
+  tools: {
+    postcss: {
+      postcssOptions: {
+        plugins: [
+          tailwindcss(),
+        ],
+      },
+
+    }
   },
-  dev: {
-    assetPrefix: './',
-  },
-  server: {
-    open: false,
+  html: {
+    template: './index.html',
   },
 });

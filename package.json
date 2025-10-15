@@ -2,50 +2,40 @@
   "name": "unfolding-drawing-app",
   "version": "1.0.0",
   "main": "index.html",
-  "pear": {
-    "name": "unfolding-drawing-app",
-    "type": "desktop",
-    "gui": {
-      "backgroundColor": "#1F2430",
-      "height": "540",
-      "width": "720"
-    }
-  },
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:rsbuild": "rsbuild build --mode development",
-    "dev:tailwind": "npx @tailwindcss/cli -i ./src/index.css -o ./dist/output.css",
+    "dev:rsbuild": "rsbuild dev",
+    "dev:tailwind": "npx @tailwindcss/cli --watch -i ./src/index.css -o ./dist/output.css",
     "dev": "npm-run-all --parallel \"dev:**\"",
     "prod:rsbuild": "rsbuild build --mode production",
     "prod:tailwind": "npm run dev:tailwind -- --minify",
     "prod": "npm-run-all --parallel \"prod:**\"",
-    "watch:rsbuild": "npm run dev:rsbuild -- --watch",
-    "watch:tailwind": "npm run dev:tailwind -- --watch",
-    "watch": "run-p \"watch:**\"",
-    "start": "pear run -d .",
     "check": "biome check --write",
     "format": "biome format --write",
     "test": "brittle test/*.test.js"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.2.3",
+    "@biomejs/biome": "^2.2.3",
     "@rsbuild/core": "^1.5.6",
     "brittle": "^3.0.0",
     "npm-run-all": "^4.1.5",
-    "pear-interface": "^1.0.0",
     "typescript": "^5.9.2"
   },
   "dependencies": {
     "@evolu/common": "^6.0.1-preview.19",
     "@evolu/web": "^1.0.1-preview.5",
-    "@tailwindcss/cli": "^4.1.14",
+    "@rsbuild/plugin-babel": "^1.0.6",
+    "@rsbuild/plugin-solid": "^1.0.6",
+    "@tailwindcss/postcss": "^4.1.14",
     "@zag-js/core": "^1.24.2",
     "@zag-js/tooltip": "^1.24.2",
     "b4a": "^1.7.3",
     "fabric": "^6.7.1",
     "hypercore-crypto": "^3.6.1",
     "hyperswarm": "^4.14.0",
+    "solid-devtools": "^0.34.4",
+    "solid-js": "^1.9.9",
     "spellcaster": "^6.0.0",
     "tailwindcss": "^4.1.14"
   }

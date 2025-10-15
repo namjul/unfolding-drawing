@@ -1,32 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
+  <head>
+    <title></title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+  </head>
 
-<head>
-  <title></title>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="./dist/output.css" rel="stylesheet">
-  <style>
-    /* dein css */
-  </style>
-  <script type="importmap">
-  {
-    "imports": {
-      "app": "./src/app.js",
-      "start": "./dist/index.js"
-    }
-  }
-</script>
-  <script type="module">
-    import * as app from  "app";
-    import start from "start";
-
-    start(app)
-  </script>
-</head>
-
-<body class="bg-sky-100 font-mono text-gray-900">
-  <div id="root"></div>
-</body>
-
+  <body class="bg-sky-100 font-mono text-gray-900">
+    <div id="<%= mountId %>"></div>
+  </body>
 </html>
