@@ -13,12 +13,9 @@ export default defineConfig({
   tools: {
     postcss: {
       postcssOptions: {
-        plugins: [
-          tailwindcss(),
-        ],
+        plugins: [tailwindcss()],
       },
-
-    }
+    },
   },
   html: {
     template: './index.html',
