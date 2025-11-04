@@ -312,11 +312,7 @@ function App(){
     const rect = svg.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    if (selectedId) {
-      handleUpdate(selectedId, { position: { x, y } });
-    } else {
-      addRadialAt({ x, y });
-    }
+    addRadialAt({ x, y });
   }
 
   return (
