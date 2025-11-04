@@ -1,0 +1,179 @@
+diff --git a/explorations/radial_pattern_explorer.html b/explorations/radial_pattern_explorer.html
+index b69f4e2..d1cfa58 100644
+--- a/explorations/radial_pattern_explorer.html
++++ b/explorations/radial_pattern_explorer.html
+@@ -188,12 +188,80 @@ function ViewControls({ activeTool, setActiveTool, selected, onChange, onDel
+-      // Selected transformation editor
+-      const { id, type, shape, radius, count, position } = selected;
+-
+-      function update(patch) {
+-        onChange(patch);
+-      }
+-
+-      return (
+-        <div className="no-select">
+-          <h3 className="text-lg font-semibold mb-2">View Controls</h3>
+-
+-          <div className="mb-2 text-sm">Editing: <span className="font-medium">{type} · {id.slice(0,5)}</span></div>
+-
+-          <div className="space-y-3">
+-            <div>
+-              <label className="block text-xs font-medium text-slate-700">Shape</label>
+-              <select
+-                value={shape}
+-                onChange={e => update({ shape: e.target.value })}
+-                className="w-full p-1 border rounded"
+-              >
+-                <option value="dot">dot</option>
+-                <option value="line">line</option>
+-                <option value="circle">circle</option>
+-              </select>
+-            </div>
+-
+-            <div>
+-              <label className="block text-xs font-medium text-slate-700">Count <span className="text-slate-500 text-xs">({count})</span></label>
+-              <input
+-                type="range"
+-                min="1"
+-                max="64"
+-                value={count}
+-                onChange={e => update({ count: Math.max(1, Math.round(+e.target.value)) })}
+-                className="w-full"
+-              />
+-            </div>
+-
+-            <div>
+-              <label className="block text-xs font-medium text-slate-700">Radius <span className="text-slate-500 text-xs">({radius}px)</span></label>
+-              <input
+-                type="range"
+-                min="8"
+-                max="500"
+-                value={radius}
+-                onChange={e => update({ radius: Math.max(0, Math.round(+e.target.value)) })}
+-                className="w-full"
+-              />
+-            </div>
+-
+-            <div>
+-              <label className="block text-xs font-medium text-slate-700">Position</label>
+-              <div className="flex gap-2">
+-                <input
+-                  type="number"
+-                  value={Math.round(position.x)}
+-                  onChange={e => update({ position: { x: Number(e.target.value), y: position.y } })}
+-                  className="w-1/2 p-1 border rounded"
+-                />
+-                <input
+-                  type="number"
+-                  value={Math.round(position.y)}
+-                  onChange={e => update({ position: { x: position.x, y: Number(e.target.value) } })}
+-                  className="w-1/2 p-1 border rounded"
+-                />
+-              </div>
+-              <div className="mt-1 text-xs text-slate-500">You can also reposition quickly by clicking the canvas to create a new transform and deleting the old one, or edit numerically here.</div>
+-            </div>
+-
+-            <div className="flex gap-2">
+-              <button
+-                onClick={() => onDelete()}
+-                className="flex-1 bg-red-500 hover:bg-red-600 text-white py-1 rounded"
+-              >
+-                Delete transformation
+-              </button>
+-            </div>
+-          </div>
+-        </div>
+-      );
++      // Recursive control renderer for a transformation and its children
++      function RenderControls(t) {
++        function update(patch) {
++          onChange(patch, t.id);
++        }
++
++        return (
++          <div className="border rounded p-2 mb-2 bg-sky-50">
++            <div className="mb-1 text-sm font-medium">Editing: {t.type} · {t.id.slice(0,5)}</div>
++
++            <div className="space-y-2">
++              <div>
++                <label className="block text-xs font-medium text-slate-700">Shape</label>
++                <select
++                  value={t.shape}
++                  onChange={e => update({ shape: e.target.value })}
++                  className="w-full p-1 border rounded"
++                >
++                  <option value="dot">dot</option>
++                  <option value="line">line</option>
++                  <option value="circle">circle</option>
++                  <option value="radial">radial repetition (nested)</option>
++                </select>
++              </div>
++
++              <div>
++                <label className="block text-xs font-medium text-slate-700">Count <span className="text-slate-500 text-xs">({t.count})</span></label>
++                <input
++                  type="range"
++                  min="1"
++                  max="64"
++                  value={t.count}
++                  onChange={e => update({ count: Math.max(1, Math.round(+e.target.value)) })}
++                  className="w-full"
++                />
++              </div>
++
++              <div>
++                <label className="block text-xs font-medium text-slate-700">Radius <span className="text-slate-500 text-xs">({t.radius}px)</span></label>
++                <input
++                  type="range"
++                  min="8"
++                  max="500"
++                  value={t.radius}
++                  onChange={e => update({ radius: Math.max(0, Math.round(+e.target.value)) })}
++                  className="w-full"
++                />
++              </div>
++
++              <div>
++                <label className="block text-xs font-medium text-slate-700">Position</label>
++                <div className="flex gap-2">
++                  <input
++                    type="number"
++                    value={Math.round(t.position.x)}
++                    onChange={e => update({ position: { x: Number(e.target.value), y: t.position.y } })}
++                    className="w-1/2 p-1 border rounded"
++                  />
++                  <input
++                    type="number"
++                    value={Math.round(t.position.y)}
++                    onChange={e => update({ position: { x: t.position.x, y: Number(e.target.value) } })}
++                    className="w-1/2 p-1 border rounded"
++                  />
++                </div>
++              </div>
++
++              <div className="flex gap-2 mt-1">
++                <button
++                  onClick={() => onDelete(t.id)}
++                  className="flex-1 bg-red-500 hover:bg-red-600 text-white py-1 rounded"
++                >
++                  Delete transformation
++                </button>
++              </div>
++
++              {t.child && (
++                <div className="mt-2 ml-4 border-l-2 border-slate-300 pl-2">
++                  <div className="text-xs font-semibold text-slate-700 mb-1">Child scaffold controls:</div>
++                  {RenderControls(t.child)}
++                </div>
++              )}
++            </div>
++          </div>
++        );
++      }
++
++      return (
++        <div className="no-select">
++          <h3 className="text-lg font-semibold mb-2">View Controls</h3>
++          {RenderControls(selected)}
++        </div>
++      );

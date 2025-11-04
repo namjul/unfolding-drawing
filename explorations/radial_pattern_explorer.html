@@ -1,444 +1,347 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Radial Pattern Explorer</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Radial Pattern Explorer</title>
 
-  <!-- Import map for React, ReactDOM and D3 (esm.sh) -->
-  <script type="importmap">
-  {
-    "imports": {
-      "react": "https://esm.sh/react@18.2.0",
-      "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-      "d3": "https://esm.sh/d3@7.8.5"
-    }
+<!-- Import map for React, ReactDOM and D3 (esm.sh) -->
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "d3": "https://esm.sh/d3@7.8.5"
   }
-  </script>
+}
+</script>
 
-  <!-- tsx loader (keeps JSX/TSX in browser) -->
-  <script type="module" src="https://esm.sh/tsx"></script>
+<!-- tsx loader (keeps JSX/TSX in browser) -->
+<script type="module" src="https://esm.sh/tsx"></script>
 
-  <!-- Tailwind (CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<!-- Tailwind (CDN) -->
+<script src="https://cdn.tailwindcss.com"></script>
 
-  <style>
-    /* small extra tweaks */
-    html,body { height: 100%; }
-    .no-select { user-select: none; -webkit-user-select:none; -moz-user-select:none; }
-    /* ensure svg scales nicely in the central pane */
-    svg { width: 100%; height: 100%; display: block; }
-  </style>
+<style>
+  html, body { height: 100%; }
+  .no-select { user-select: none; -webkit-user-select:none; -moz-user-select:none; }
+  svg { width: 100%; height: 100%; display: block; }
+</style>
 </head>
 <body class="bg-slate-50">
 
-  <div id="root"></div>
+<div id="root"></div>
 
-  <script type="text/babel">
-    import React, { useState, useRef, useEffect, useMemo } from "react";
-    import { createRoot } from "react-dom/client";
-    import * as d3 from "d3";
+<script type="text/babel">
+import React, { useState, useMemo } from "react";
+import { createRoot } from "react-dom/client";
+import * as d3 from "d3";
 
-    /******************************
-     * Utilities
-     ******************************/
-    const uid = () =>
-      Math.random().toString(36).slice(2, 9);
+/* ---------------------------
+   Utilities
+   --------------------------- */
+const uid = () => (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2,9);
 
-    // compute radial points from a center, radius and count
-    function computeRadialPoints({ x, y }, radius, count) {
-      if (count <= 0) return [];
-      const angles = d3.range(count).map(i => (i / count) * Math.PI * 2);
-      return angles.map(a => ({
-        x: x + Math.cos(a) * radius,
-        y: y + Math.sin(a) * radius,
-        angle: a
-      }));
-    }
+function computeRadialPoints({ x, y }, radius, count) {
+  if (!count || count <= 0) return [];
+  const angles = d3.range(count).map(i => (i / count) * Math.PI * 2);
+  return angles.map(a => ({ x: x + Math.cos(a) * radius, y: y + Math.sin(a) * radius, angle: a }));
+}
 
-    /******************************
-     * Default values
-     ******************************/
-    const DEFAULT_TOOL = "radial";
-    const DEFAULT_RADIAL = {
+/* ---------------------------
+   App
+   --------------------------- */
+function App(){
+  const [transforms, setTransforms] = useState([]); // top-level transforms; children are nested inside objects
+  const [selectedId, setSelectedId] = useState(null);
+
+  // Create a new radial at pos and select it
+  function addRadialAt(pos){
+    const t = {
+      id: uid(),
       type: "radial",
-      shape: "dot", // dot | line | circle
+      shape: "dot",
       radius: 80,
       count: 8,
+      position: pos,
+      child: null
     };
+    setTransforms(prev => [...prev, t]);
+    setSelectedId(t.id);
+  }
 
-    /******************************
-     * Main App
-     ******************************/
-    function App() {
-      // transformations list
-      const [transforms, setTransforms] = useState([]);
-      const [selectedId, setSelectedId] = useState(null);
-      // active tool in the left control (for future expansion)
-      const [activeTool, setActiveTool] = useState(DEFAULT_TOOL);
-
-      // Add a new radial transformation at position
-      function addRadialAt(pos) {
-        const t = {
-          id: uid(),
-          type: "radial",
-          shape: DEFAULT_RADIAL.shape,
-          radius: DEFAULT_RADIAL.radius,
-          count: DEFAULT_RADIAL.count,
-          position: pos
-        };
-        setTransforms(prev => [...prev, t]);
-        setSelectedId(t.id);
+  // Recursively update an item by id in the transforms tree
+  function updateById(list, id, patch){
+    return list.map(item => {
+      if (item.id === id) {
+        let updated = { ...item, ...patch };
+        // if shape changed to radial and child missing create default child
+        if (patch.shape === "radial" && !item.child) {
+          updated.child = {
+            id: uid(),
+            type: "radial",
+            shape: "dot",
+            radius: Math.max(20, item.radius / 2),
+            count: Math.max(3, Math.floor(item.count / 2)),
+            position: { x: item.position.x, y: item.position.y },
+            child: null
+          };
+        }
+        return updated;
       }
-
-      function updateTransform(id, patch) {
-        setTransforms(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)));
+      // if has child, recurse into it
+      if (item.child) {
+        return { ...item, child: updateById([item.child], id, patch)[0] };
       }
+      return item;
+    });
+  }
 
-      function deleteTransform(id) {
-        setTransforms(prev => prev.filter(t => t.id !== id));
-        if (selectedId === id) setSelectedId(null);
+  // Public update handler
+  function handleUpdate(id, patch){
+    setTransforms(prev => updateById(prev, id, patch));
+  }
+
+  // Recursively delete by id. Returns new list.
+  function deleteById(list, id){
+    // Remove top-level items matching id, and recurse into children
+    const result = [];
+    for (const item of list) {
+      if (item.id === id) continue; // skip (deleting)
+      if (item.child) {
+        const newChildList = deleteById([item.child], id);
+        const newChild = newChildList.length > 0 ? newChildList[0] : null;
+        result.push({ ...item, child: newChild });
+      } else {
+        result.push(item);
       }
+    }
+    return result;
+  }
 
-      const selected = transforms.find(t => t.id === selectedId) || null;
+  function handleDelete(id){
+    setTransforms(prev => deleteById(prev, id));
+    if (selectedId === id) setSelectedId(null);
+  }
 
-      return (
-        <div className="flex gap-2 h-screen p-2 *:min-w-0">
-          <div className="p-2 basis-1/25 grow max-w-1/3 bg-sky-50 rounded-md shadow-sm max-w-1/4">
-            <ViewControls
-              activeTool={activeTool}
-              setActiveTool={setActiveTool}
-              selected={selected}
-              onChange={(patch) => selected && updateTransform(selected.id, patch)}
-              onDelete={() => selected && deleteTransform(selected.id)}
-              onCreateDefault={() => setActiveTool(DEFAULT_TOOL)}
-            />
-          </div>
+  // Find transform by id recursively
+  function findById(list, id){
+    for (const item of list) {
+      if (item.id === id) return item;
+      if (item.child){
+        const found = findById([item.child], id);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
 
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="p-2 basis-1/5 grow bg-white rounded-md drop-shadow-sm min-w-1/2"
-            onClick={(e) => {
-              // compute click relative to svg bounding box
-              const svg = e.currentTarget;
-              const rect = svg.getBoundingClientRect();
-              const x = e.clientX - rect.left;
-              const y = e.clientY - rect.top;
-              addRadialAt({ x, y });
-            }}
-          >
-            <g>
-              <PatternCanvas
-                transforms={transforms}
-                selectedId={selectedId}
-                onSelect={(id) => setSelectedId(id)}
-                onUpdatePosition={(id, pos) => updateTransform(id, { position: pos })}
-              />
-            </g>
-          </svg>
+  const selected = useMemo(() => findById(transforms, selectedId), [transforms, selectedId]);
 
-          <div className="p-2 basis-1/25 grow max-w-100 bg-sky-50 rounded-md shadow-sm  max-w-1/4">
-            <TransformationList
-              transforms={transforms}
-              selectedId={selectedId}
-              onSelect={(id) => setSelectedId(id)}
-              onDelete={(id) => deleteTransform(id)}
-            />
-          </div>
-        </div>
+  /* ---------------------------
+     Recursive rendering for canvas
+     --------------------------- */
+  function renderTransformRecursive(t, depth = 0, keyPrefix = ""){
+    const points = computeRadialPoints(t.position, t.radius, t.count);
+    const group = [];
+
+    // scaffolding (drawn once per transform)
+    points.forEach((p, i) => {
+      // scaffolding line
+      group.push(
+        <line
+          key={`${t.id}-scaffold-${i}`}
+          x1={t.position.x}
+          y1={t.position.y}
+          x2={p.x}
+          y2={p.y}
+          stroke="#9AAED0"
+          strokeWidth={1}
+          strokeDasharray="4 4"
+          opacity={0.7}
+        />
       );
+    });
+
+    // center marker if selected
+    if (selectedId === t.id) {
+      group.push(<circle key={`${t.id}-center`} cx={t.position.x} cy={t.position.y} r={6} fill="#2563EB" opacity={0.9} />);
     }
 
-    /******************************
-     * View Controls (left panel)
-     ******************************/
-    function ViewControls({ activeTool, setActiveTool, selected, onChange, onDelete }) {
-      // If nothing selected, show tool selection and small help
-      if (!selected) {
-        return (
-          <div className="no-select">
-            <h3 className="text-lg font-semibold mb-2">View Controls</h3>
-            <div className="mb-3 text-sm">Select a transformation from the list (right) to edit it here.</div>
+    // shapes and recursive children
+    points.forEach((p, i) => {
+      // draw shape (if primitive)
+      if (t.shape === "dot") {
+        group.push(<circle key={`${t.id}-dot-${i}`} cx={p.x} cy={p.y} r={6} fill="#0F172A" />);
+      } else if (t.shape === "circle") {
+        group.push(<circle key={`${t.id}-circle-${i}`} cx={p.x} cy={p.y} r={12} fill="none" stroke="#0F172A" strokeWidth={2} />);
+      } else if (t.shape === "line") {
+        const len = Math.min(28, Math.max(8, t.radius * 0.2));
+        const x2 = p.x + Math.cos(p.angle) * len;
+        const y2 = p.y + Math.sin(p.angle) * len;
+        group.push(<line key={`${t.id}-line-${i}`} x1={p.x} y1={p.y} x2={x2} y2={y2} stroke="#0F172A" strokeWidth={2} strokeLinecap="round" />);
+      }
 
-            <div className="mb-4">
-              <label className="block text-xs font-medium text-slate-700 mb-1">Active scaffolding tool</label>
-              <select
-                value={activeTool}
-                onChange={e => setActiveTool(e.target.value)}
-                className="w-full p-1 border rounded"
-              >
-                <option value="radial">Radial Repetition (prototype)</option>
-                {/* future tools will be added here */}
-              </select>
-            </div>
-
-            <div className="text-xs text-slate-600">
-              Interaction:
-              <ul className="list-disc pl-4 mt-1">
-                <li>Click canvas to create a radial scaffolding (center = click)</li>
-                <li>Select an entry on the right to edit/delete</li>
-                <li>Scaffolding lines are guides; shapes are the actual drawing</li>
-              </ul>
-            </div>
-          </div>
+      // Always render child recursively if exists (child is positioned at p)
+      if (t.child) {
+        const childCopy = { ...t.child, position: { x: p.x, y: p.y } };
+        // Wrap child group for clarity and pointer events
+        group.push(
+          <g key={`${t.id}-child-${i}`}>
+            {renderTransformRecursive(childCopy, depth + 1, `${t.id}-child-${i}-`)}
+          </g>
         );
       }
+    });
 
-      // Selected transformation editor
-      const { id, type, shape, radius, count, position } = selected;
+    // add clickable center hit area to select / double-click to move
+    group.push(
+      <rect
+        key={`${t.id}-hit`}
+        x={t.position.x - 18}
+        y={t.position.y - 18}
+        width={36}
+        height={36}
+        fill="transparent"
+        style={{ cursor: "pointer" }}
+        onClick={(e) => { e.stopPropagation(); setSelectedId(t.id); }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          const svg = e.currentTarget.ownerSVGElement;
+          const rect = svg.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          handleUpdate(t.id, { position: { x, y } });
+        }}
+        title="Click to select. Double-click to reposition center."
+      />
+    );
 
-      function update(patch) {
-        onChange(patch);
-      }
+    return group;
+  }
 
-      return (
-        <div className="no-select">
-          <h3 className="text-lg font-semibold mb-2">View Controls</h3>
+  const canvasElements = [];
+  transforms.forEach(t => canvasElements.push(...renderTransformRecursive(t)));
 
-          <div className="mb-2 text-sm">Editing: <span className="font-medium">{type} · {id.slice(0,5)}</span></div>
+  /* ---------------------------
+     Left panel: controls for selected transform (and nested child-list)
+     --------------------------- */
+  function RenderControls(t){
+    if (!t) return null;
+    function update(patch){
+      handleUpdate(t.id, patch);
+    }
+    return (
+      <div className="border rounded p-2 mb-2 bg-sky-50">
+        <div className="mb-1 text-sm font-medium">Editing: {t.type} · {t.id.slice(0,6)}</div>
 
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-700">Shape</label>
-              <select
-                value={shape}
-                onChange={e => update({ shape: e.target.value })}
-                className="w-full p-1 border rounded"
-              >
-                <option value="dot">dot</option>
-                <option value="line">line</option>
-                <option value="circle">circle</option>
-              </select>
-            </div>
+        <div className="space-y-2">
+          <div>
+            <label className="block text-xs font-medium text-slate-700">Shape</label>
+            <select value={t.shape} onChange={e=>update({ shape: e.target.value })} className="w-full p-1 border rounded">
+              <option value="dot">dot</option>
+              <option value="line">line</option>
+              <option value="circle">circle</option>
+              <option value="radial">radial repetition (nested)</option>
+            </select>
+          </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-700">Count <span className="text-slate-500 text-xs">({count})</span></label>
-              <input
-                type="range"
-                min="1"
-                max="64"
-                value={count}
-                onChange={e => update({ count: Math.max(1, Math.round(+e.target.value)) })}
-                className="w-full"
-              />
-            </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700">Count <span className="text-slate-500 text-xs">({t.count})</span></label>
+            <input type="range" min="1" max="64" value={t.count} onChange={e=>update({ count: Math.max(1, Math.round(+e.target.value)) })} className="w-full" />
+          </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-700">Radius <span className="text-slate-500 text-xs">({radius}px)</span></label>
-              <input
-                type="range"
-                min="8"
-                max="500"
-                value={radius}
-                onChange={e => update({ radius: Math.max(0, Math.round(+e.target.value)) })}
-                className="w-full"
-              />
-            </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-700">Radius <span className="text-slate-500 text-xs">({t.radius}px)</span></label>
+            <input type="range" min="8" max="500" value={t.radius} onChange={e=>update({ radius: Math.max(0, Math.round(+e.target.value)) })} className="w-full" />
+          </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-700">Position</label>
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  value={Math.round(position.x)}
-                  onChange={e => update({ position: { x: Number(e.target.value), y: position.y } })}
-                  className="w-1/2 p-1 border rounded"
-                />
-                <input
-                  type="number"
-                  value={Math.round(position.y)}
-                  onChange={e => update({ position: { x: position.x, y: Number(e.target.value) } })}
-                  className="w-1/2 p-1 border rounded"
-                />
-              </div>
-              <div className="mt-1 text-xs text-slate-500">You can also reposition quickly by clicking the canvas to create a new transform and deleting the old one, or edit numerically here.</div>
-            </div>
-
+          <div>
+            <label className="block text-xs font-medium text-slate-700">Position</label>
             <div className="flex gap-2">
-              <button
-                onClick={() => onDelete()}
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white py-1 rounded"
-              >
-                Delete transformation
-              </button>
+              <input type="number" value={Math.round(t.position.x)} onChange={e=>update({ position: { x: Number(e.target.value), y: t.position.y } })} className="w-1/2 p-1 border rounded" />
+              <input type="number" value={Math.round(t.position.y)} onChange={e=>update({ position: { x: t.position.x, y: Number(e.target.value) } })} className="w-1/2 p-1 border rounded" />
             </div>
+            <div className="mt-1 text-xs text-slate-500">Or click on the canvas to set the selected transform's center.</div>
+          </div>
+
+          <div className="flex gap-2 mt-1">
+            <button onClick={()=>handleDelete(t.id)} className="flex-1 bg-red-500 hover:bg-red-600 text-white py-1 rounded">Delete transformation</button>
+          </div>
+
+          {t.child && (
+            <div className="mt-2 ml-4 border-l-2 border-slate-300 pl-2">
+              <div className="text-xs font-semibold text-slate-700 mb-1">Child scaffold controls:</div>
+              {RenderControls(t.child)}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* ---------------------------
+     Right panel: recursive transform list
+     --------------------------- */
+  function RenderList(list, level = 0){
+    return list.map(item => (
+      <div key={item.id} className={`pl-${level*4} mb-1`}>
+        <div
+          className={`cursor-pointer p-2 rounded flex items-center justify-between ${selectedId===item.id ? 'bg-blue-50 border border-blue-200' : 'bg-white border border-slate-200 hover:bg-slate-50'}`}
+          onClick={() => setSelectedId(item.id)}
+        >
+          <div className="min-w-0">
+            <div className="text-sm font-medium truncate">{item.type} · {item.id.slice(0,6)}</div>
+            <div className="text-xs text-slate-500 truncate">shape: {item.shape} · count: {item.count} · radius: {item.radius}px</div>
+          </div>
+          <div className="flex gap-2 ml-3">
+            <button className="px-2 py-1 text-xs border rounded hover:bg-slate-100" onClick={(e)=>{ e.stopPropagation(); setSelectedId(item.id); }}>Select</button>
+            <button className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600" onClick={(e)=>{ e.stopPropagation(); handleDelete(item.id); }}>Delete</button>
           </div>
         </div>
-      );
+        {item.child && <div className="ml-3 mt-2">{RenderList([item.child], level + 1)}</div>}
+      </div>
+    ));
+  }
+
+  /* ---------------------------
+     Canvas click: create or update selected
+     --------------------------- */
+  function handleCanvasClick(e){
+    const svg = e.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (selectedId) {
+      handleUpdate(selectedId, { position: { x, y } });
+    } else {
+      addRadialAt({ x, y });
     }
+  }
 
-    /******************************
-     * PatternCanvas (middle SVG)
-     *
-     * Renders scaffolding + shapes for all transforms.
-     ******************************/
-    function PatternCanvas({ transforms, selectedId, onSelect, onUpdatePosition }) {
-      // We use memoization for computed points to avoid recompute blasts.
-      const computed = useMemo(() => {
-        return transforms.map(t => {
-          if (t.type === "radial") {
-            const points = computeRadialPoints(t.position, t.radius, t.count);
-            return { ...t, _points: points };
-          }
-          return { ...t, _points: [] };
-        });
-      }, [transforms]);
+  return (
+    <div className="flex gap-2 h-screen p-2 *:min-w-0">
+      <div className="p-2 basis-1/5 grow max-w-100 bg-sky-50 rounded-md shadow-sm overflow-auto">
+        <h3 className="text-lg font-semibold mb-2">View Controls</h3>
+        { selected ? RenderControls(selected) : (
+          <div className="text-sm text-slate-600">Select a transformation from the right to edit it. Click the canvas to create a new one.</div>
+        )}
+      </div>
 
-      // Render each transformation: scaffolding first, shapes on top.
-      return (
-        <g>
-          {computed.map(t => (
-            <g key={t.id}>
-              {/* scaffolding potentials */}
-              <g>
-                {t._points.map((p, i) => (
-                  <line
-                    key={"s-" + i}
-                    x1={t.position.x}
-                    y1={t.position.y}
-                    x2={p.x}
-                    y2={p.y}
-                    stroke="#9AAED0"
-                    strokeWidth={1}
-                    strokeDasharray="4 4"
-                    opacity={0.7}
-                  />
-                ))}
-                {/* optional center marker for selected */}
-                {selectedId === t.id && (
-                  <circle cx={t.position.x} cy={t.position.y} r={6} fill="#2563EB" opacity={0.9} />
-                )}
-              </g>
+      <svg xmlns="http://www.w3.org/2000/svg" className="p-2 basis-3/5 grow bg-white rounded-md drop-shadow-sm" onClick={handleCanvasClick}>
+        <g>{canvasElements}</g>
+      </svg>
 
-              {/* shapes (the actual drawing) */}
-              <g>
-                {t._points.map((p, i) => {
-                  if (t.shape === "dot") {
-                    return (
-                      <circle
-                        key={"g-dot-" + i}
-                        cx={p.x}
-                        cy={p.y}
-                        r={6}
-                        fill="#0F172A"
-                      />
-                    );
-                  } else if (t.shape === "circle") {
-                    return (
-                      <circle
-                        key={"g-circle-" + i}
-                        cx={p.x}
-                        cy={p.y}
-                        r={12}
-                        fill="none"
-                        stroke="#0F172A"
-                        strokeWidth={2}
-                      />
-                    );
-                  } else if (t.shape === "line") {
-                    // small outward line segment at the end of the scaffold
-                    const len = Math.min(28, Math.max(8, t.radius * 0.2));
-                    const x2 = p.x + Math.cos(p.angle) * len;
-                    const y2 = p.y + Math.sin(p.angle) * len;
-                    return (
-                      <line
-                        key={"g-line-" + i}
-                        x1={p.x}
-                        y1={p.y}
-                        x2={x2}
-                        y2={y2}
-                        stroke="#0F172A"
-                        strokeWidth={2}
-                        strokeLinecap="round"
-                      />
-                    );
-                  }
-                  return null;
-                })}
-              </g>
+      <div className="p-2 basis-1/5 grow max-w-100 bg-sky-50 rounded-md shadow-sm overflow-auto">
+        <h3 className="text-lg font-semibold mb-2">Transformation Controls</h3>
+        {transforms.length === 0 ? <div className="text-sm text-slate-600">No transformations yet — click the canvas to create one.</div> : <div>{RenderList(transforms)}</div>}
+      </div>
+    </div>
+  );
+}
 
-              {/* clickable invisible hit area to select / drag center */}
-              <rect
-                x={t.position.x - 16}
-                y={t.position.y - 16}
-                width={32}
-                height={32}
-                fill="transparent"
-                style={{ cursor: "pointer" }}
-                onClick={(e) => {
-                  // stop propagation so svg click doesn't create a new transform
-                  e.stopPropagation();
-                  onSelect(t.id);
-                }}
-                onDoubleClick={(e) => {
-                  // allow double-clicking the center to move it to pointer (demonstration)
-                  e.stopPropagation();
-                  // compute pointer relative position
-                  const svg = e.currentTarget.ownerSVGElement;
-                  const rect = svg.getBoundingClientRect();
-                  const x = e.clientX - rect.left;
-                  const y = e.clientY - rect.top;
-                  onUpdatePosition(t.id, { x, y });
-                }}
-                title="Click to select. Double-click to reposition center."
-              />
-            </g>
-          ))}
-        </g>
-      );
-    }
-
-    /******************************
-     * TransformationList (right panel)
-     ******************************/
-    function TransformationList({ transforms, selectedId, onSelect, onDelete }) {
-      return (
-        <div>
-          <h3 className="text-lg font-semibold mb-2">Transformation Controls</h3>
-          <div className="text-sm mb-3">Click an entry to select it and load its controls in the left panel.</div>
-
-          <div className="space-y-2 overflow-auto" style={{ maxHeight: "72vh" }}>
-            {transforms.length === 0 && (
-              <div className="p-2 text-sm text-slate-600">No transformations yet — click the canvas to create one.</div>
-            )}
-
-            {transforms.map(t => (
-              <div
-                key={t.id}
-                className={`p-2 rounded border ${selectedId === t.id ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white"} flex items-center justify-between`}
-              >
-                <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{t.type} · {t.id.slice(0,6)}</div>
-                  <div className="text-xs text-slate-500 truncate">
-                    shape: {t.shape} · count: {t.count} · radius: {t.radius}px
-                  </div>
-                </div>
-
-                <div className="flex gap-2 ml-3">
-                  <button
-                    className="px-2 py-1 text-xs border rounded hover:bg-slate-100"
-                    onClick={() => onSelect(t.id)}
-                  >
-                    Select
-                  </button>
-                  <button
-                    className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600"
-                    onClick={() => onDelete(t.id)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    /******************************
-     * Render
-     ******************************/
-    createRoot(document.getElementById("root")).render(<App />);
-  </script>
+createRoot(document.getElementById("root")).render(<App />);
+</script>
 </body>
 </html>
+
