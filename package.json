@@ -31,13 +31,8 @@
     "@tailwindcss/postcss": "^4.1.14",
     "@zag-js/core": "^1.24.2",
     "@zag-js/tooltip": "^1.24.2",
-    "b4a": "^1.7.3",
-    "fabric": "^6.7.1",
-    "hypercore-crypto": "^3.6.1",
-    "hyperswarm": "^4.14.0",
     "solid-devtools": "^0.34.4",
     "solid-js": "^1.9.9",
-    "spellcaster": "^6.0.0",
     "tailwindcss": "^4.1.14"
   }
 }
