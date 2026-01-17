@@ -235,6 +235,61 @@ When modifying drawing-related code:
 
 If a change increases precision but reduces exploratory capacity, it should be treated with caution.
 
+### Mandatory Planning Phase for Non-Trivial Tasks
+
+For any non-trivial task (including but not limited to: code changes, refactors, architectural decisions, schema changes, or multi-file edits), agents must not act immediately.
+
+Agents must first respond with the following, in order:
+
+1. Understanding
+A concise restatement of what the agent believes the user asked for, in its own words.
+
+2. TL;DR
+A short summary (2–5 bullets or sentences) of the proposed approach and expected outcome.
+
+3. Plan
+A step-by-step plan describing how the task would be addressed, including:
+
+- affected modules or files,
+- assumptions being made,
+- potential risks or ambiguities,
+
+and alternative approaches if relevant.
+
+No files may be changed and no code may be written until the user explicitly confirms or corrects this plan.
+
+#### Rationale
+
+Agents do not reliably understand instructions on the first attempt.
+Making the agent’s understanding explicit allows misunderstandings to be detected immediately.
+
+Agents can produce large volumes of text quickly.
+A TL;DR allows fast validation before investing effort in review.
+
+Reviewing a plan before execution helps catch:
+
+incorrect assumptions,
+
+misplaced files,
+
+duplicated or unnecessary logic,
+
+violations of domain or architectural rules.
+
+If the agent’s understanding or TL;DR is incorrect, the remaining output should be ignored and the agent re-prompted with clarification.
+
+#### Scope
+
+This requirement applies to:
+
+assisted development via Codex or similar tools,
+
+architectural or domain-level reasoning,
+
+any change that is not a single, obvious, mechanical edit.
+
+Trivial tasks (e.g. formatting, typo fixes, explicitly scoped one-line changes) may skip this phase unless explicitly requested.
+
 ---
 
 ## Closing Note
