@@ -1,6 +1,13 @@
-import { createEvolu, getOrThrow, SimpleName } from '@evolu/common';
+import {
+  createEvolu,
+  type EvoluSchema,
+  FiniteNumber,
+  getOrThrow,
+  id,
+  literal,
+  SimpleName,
+} from '@evolu/common';
 import { evoluWebDeps } from '@evolu/web';
-import { FiniteNumber, id, literal, type EvoluSchema } from '@evolu/common';
 import { createUseEvolu } from './evolu';
 
 const Point = literal('point');

@@ -1,7 +1,7 @@
-import { Evolu } from '@evolu/common/evolu';
+import type { Evolu } from '@evolu/common/evolu';
 import { useContext } from 'solid-js';
-import { EvoluContext } from './EvoluContext.js';
 import type { createUseEvolu } from './createUseEvolu';
+import { EvoluContext } from './EvoluContext.js';
 
 /**
  * React Hook returning a generic instance of {@link Evolu}.
