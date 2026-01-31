@@ -86,6 +86,49 @@ Coherent explanation without operational meaning, falsifiability, or evidence.
 - ❌ "This creates flow and synergy"
 - ✅ "This reduces action-to-feedback time from 200ms to 50ms"
 
+### Pattern vs Principle vs Rule
+
+**Principle:** Non-negotiable constraint that enables (e.g., "claims require falsifiability")
+
+**Pattern:** Observed regularity that guides (e.g., "EAI loop structure")
+
+**Rule:** Pattern treated as mandatory regardless of context (anti-pattern)
+
+**Anti-pattern:** Treating patterns as rules via authority rather than evidence.
+
+**Contact test:** Can you name valid exceptions? If "no because it's the rule," you've ossified a pattern.
+
+---
+
+### Authority in Protocol Governance
+
+**Hierarchy of authority (highest to lowest):**
+1. Evidence (contact test results, measured outcomes)
+2. Principles (generative constraints)
+3. Patterns (observed regularities, evolvable)
+4. Personal authority (never trumps evidence)
+
+**Red flag:** "Because I said so" or "That's the protocol" ending discussion without evidence.
+
+**See:** AGENTS.md Disagreement Resolution Protocol for process.
+
+---
+
+### Protocol Evolution
+
+**All protocols in this family are living documents.**
+
+**Evolution process:**
+1. Observe pattern doesn't fit
+2. Specify contact test for proposed change
+3. Try in limited scope
+4. Evaluate evidence
+5. Update if supported
+
+**Anti-pattern:** Only original authors can update protocol (kills learning from new observations).
+
+**Contact test for healthy protocol:** Gets updated quarterly by contributors at all levels.
+
 ---
 
 ## Epistemic Discipline Terms
