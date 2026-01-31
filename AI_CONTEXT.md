@@ -478,15 +478,25 @@ Agents may recommend:
 
 ## Commit & Pull Request Guidelines
 
-- Commit messages: short, present-tense imperatives
-- Pull requests should include:
-  - A concise summary using EAI loop structure (Aim, Claim, Contact Test)
-  - Linked issues where applicable
-  - Screenshots or gifs for UI changes
-  - Notes on tests run
-  - Identification of strengthened/weakened centers
-  - Statement of co-variant effects
-- Keep PRs scoped and avoid committing generated files unless necessary
+Commits are permanent records of interventions in the system. They should maintain the same epistemic discipline as the changes themselves.
+
+**Format:** Use [Living Systems Commit Convention](./Living-Systems-Commits.md)
+
+**Key principles:**
+- Commit messages document center impacts, not just file changes
+- Include contact tests for non-trivial changes
+- Use revision commits when evidence contradicts assumptions
+- Track co-variance in commit footers
+
+**Commit type selection:**
+- `strengthen`: Enhancing validated centers
+- `create`: New centers (hypothesis requiring contact test)
+- `dissolve`: Removing failed structure
+- `revision`: Updates based on evidence
+- `unfolding`: Incremental evolution
+- `simplify`: Complexity reduction
+
+See [Living Systems Commits](./Living-Systems-Commits.md) for complete specification.
 
 ---
 
