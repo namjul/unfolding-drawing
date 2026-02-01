@@ -173,7 +173,7 @@ const App: Component = () => {
       <svg
         ref={svg}
         xmlns="http://www.w3.org/2000/svg"
-        class={`p-2 basis-1/5 grow bg-sky-50 ${cursorClass()}`}
+        class={`p-2 basis-1/5 grow bg-sky-50 touch-none ${cursorClass()}`}
       >
         <title>Drawing canvas</title>
         <g
