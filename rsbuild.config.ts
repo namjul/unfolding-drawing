@@ -23,6 +23,6 @@ export default defineConfig({
     template: './index.html',
   },
   output: {
-    assetPrefix: isProduction ? '/unfolding-drawing-app/' : '/',
+    assetPrefix: isProduction ? '/unfolding-drawing/' : '/',
   },
 });
