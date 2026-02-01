@@ -1,15 +1,19 @@
 import type { Component } from 'solid-js';
 
-interface ZoomControlsProps {
+type Mode = 'default' | 'pan';
+
+interface ViewControlsProps {
   scale: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onResetZoom: () => void;
   canZoomIn: boolean;
   canZoomOut: boolean;
+  mode: Mode;
+  onTogglePan: () => void;
 }
 
-const ZoomControls: Component<ZoomControlsProps> = (props) => {
+const ViewControls: Component<ViewControlsProps> = (props) => {
   const percentage = () => Math.round(props.scale * 100);
   const canReset = () => props.scale !== 1;
 
@@ -40,8 +44,21 @@ const ZoomControls: Component<ZoomControlsProps> = (props) => {
       >
         −
       </button>
+      <hr class="my-2 border-sky-300" />
+      <button
+        type="button"
+        class={`px-3 py-1 rounded ${
+          props.mode === 'pan'
+            ? 'bg-sky-500 text-white'
+            : 'bg-sky-200 hover:bg-sky-300'
+        }`}
+        onClick={props.onTogglePan}
+        title="Toggle pan mode (hold Space for temporary pan)"
+      >
+        Pan
+      </button>
     </div>
   );
 };
 
-export default ZoomControls;
+export default ViewControls;

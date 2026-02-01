@@ -2,7 +2,7 @@
 
 ## Status
 
-**Planned** — not yet implemented.
+**Implemented** — basic pan navigation complete.
 
 ## Relationship to the Whole
 
