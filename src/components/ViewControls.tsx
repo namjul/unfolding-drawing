@@ -11,6 +11,7 @@ interface ViewControlsProps {
   canZoomOut: boolean;
   mode: Mode;
   onTogglePan: () => void;
+  onResetDrawing: () => void;
 }
 
 const ViewControls: Component<ViewControlsProps> = (props) => {
@@ -56,6 +57,15 @@ const ViewControls: Component<ViewControlsProps> = (props) => {
         title="Toggle pan mode (hold Space for temporary pan)"
       >
         Pan
+      </button>
+      <hr class="my-2 border-sky-300" />
+      <button
+        type="button"
+        class="px-3 py-1 bg-amber-200 hover:bg-amber-300 rounded text-sm"
+        onClick={props.onResetDrawing}
+        title="Reset drawing and start over"
+      >
+        Reset Drawing
       </button>
     </div>
   );

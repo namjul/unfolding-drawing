@@ -5,29 +5,64 @@ import {
   getOrThrow,
   id,
   literal,
+  nullOr,
   SimpleName,
+  union,
 } from '@evolu/common';
 import { evoluWebDeps } from '@evolu/web';
 import { createUseEvolu } from './evolu';
 
-const Point = literal('point');
-type Point = typeof Point.Type;
+const PlaceId = id('Place');
+export type PlaceId = typeof PlaceId.Type;
 
-const ShapeId = id('Shape');
-type ShapeId = typeof ShapeId.Type;
+const TransformationId = id('Transformation');
+export type TransformationId = typeof TransformationId.Type;
+
+const AddKind = literal('add');
+const MoveKind = literal('move');
+const DeleteKind = literal('delete');
+const TransformationKind = union(AddKind, MoveKind, DeleteKind);
+export type TransformationKind = typeof TransformationKind.Type;
 
 export const Schema = {
-  shape: {
-    id: ShapeId,
-    kind: Point,
+  place: {
+    id: PlaceId,
+    parentId: nullOr(PlaceId),
     x: FiniteNumber,
     y: FiniteNumber,
+  },
+  transformation: {
+    id: TransformationId,
+    kind: TransformationKind,
+    placeId: PlaceId,
+    parentId: nullOr(PlaceId),
+    x: nullOr(FiniteNumber),
+    y: nullOr(FiniteNumber),
   },
 } satisfies EvoluSchema;
 
 export const evolu = createEvolu(evoluWebDeps)(Schema, {
   name: getOrThrow(SimpleName.from('unfolding-drawing-app')),
-  // syncUrl: "wss://your-sync-url", // optional, defaults to wss://free.evoluhq.com
 });
 
 export const useEvolu = createUseEvolu(evolu);
+
+export const allPlacesQuery = evolu.createQuery((db) =>
+  db
+    .selectFrom('place')
+    .selectAll()
+    .where((eb) =>
+      eb.or([eb('isDeleted', 'is', null), eb('isDeleted', '=', 0)]),
+    )
+    .orderBy('createdAt'),
+);
+
+export const allTransformationsQuery = evolu.createQuery((db) =>
+  db
+    .selectFrom('transformation')
+    .selectAll()
+    .where((eb) =>
+      eb.or([eb('isDeleted', 'is', null), eb('isDeleted', '=', 0)]),
+    )
+    .orderBy('createdAt'),
+);
