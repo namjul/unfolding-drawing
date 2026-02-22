@@ -19,6 +19,7 @@ const TransformationsList: Component = () => {
               {t.kind === 'move' &&
                 `Move Place to (${t.x ?? '?'}, ${t.y ?? '?'})`}
               {t.kind === 'delete' && 'Delete Place'}
+              {t.kind === 'rotate' && `Rotate Place (angle: ${t.angle ?? '?'})`}
             </li>
           ))}
         </ul>

@@ -1,5 +1,6 @@
 import type { Accessor, Component } from 'solid-js';
 import type { PlaceId } from '../lib/evolu-db';
+import type { TransformChoice } from '../lib/transform-matrix';
 
 export type GuideStep =
   | 'observe'
@@ -8,7 +9,7 @@ export type GuideStep =
   | 'execute'
   | 'complete';
 
-export type TransformChoice = 'add' | 'move' | 'delete' | null;
+export type { TransformChoice };
 
 interface DrawingGuideProps {
   step: Accessor<GuideStep>;
@@ -27,6 +28,11 @@ interface DrawingGuideProps {
   hasDrawingPaneSelected: boolean;
   pendingAdd: boolean;
   pendingMove: boolean;
+  pendingRotate: boolean;
+  availableTransforms: readonly {
+    id: NonNullable<TransformChoice>;
+    label: string;
+  }[];
 }
 
 const PHASES = [
@@ -60,16 +66,21 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
     }
     if (phaseId === 'transform') {
       if (props.transformChoice === 'add') return 'Add Place';
+      if (props.transformChoice === 'addRelated') return 'Add a Related Place';
       if (props.transformChoice === 'move') return 'Move Place';
       if (props.transformChoice === 'delete') return 'Delete Place';
+      if (props.transformChoice === 'rotate') return 'Rotate Place';
       return null;
     }
     if (phaseId === 'execute') {
       if (step() === 'complete') return 'Commit / Reject';
       if (step() === 'execute') {
         if (props.transformChoice === 'add') return 'Click to add';
+        if (props.transformChoice === 'addRelated')
+          return 'Click to add related';
         if (props.transformChoice === 'move') return 'Drag to move';
         if (props.transformChoice === 'delete') return 'Confirm delete';
+        if (props.transformChoice === 'rotate') return 'Drag axis to rotate';
       }
       return null;
     }
@@ -175,45 +186,19 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                         Choose a transformation:
                       </p>
                       <div class="flex flex-col gap-1">
-                        <button
-                          type="button"
-                          class={`px-3 py-2 rounded text-sm text-left ${
-                            props.transformChoice === 'add'
-                              ? 'bg-sky-400 text-white'
-                              : 'bg-sky-100 hover:bg-sky-200'
-                          }`}
-                          onClick={() => props.onTransformChoice('add')}
-                          disabled={
-                            !props.hasDrawingPaneSelected &&
-                            !props.selectedPlaceId
-                          }
-                        >
-                          Add Place
-                        </button>
-                        <button
-                          type="button"
-                          class={`px-3 py-2 rounded text-sm text-left ${
-                            props.transformChoice === 'move'
-                              ? 'bg-sky-400 text-white'
-                              : 'bg-sky-100 hover:bg-sky-200'
-                          }`}
-                          onClick={() => props.onTransformChoice('move')}
-                          disabled={!props.selectedPlaceId}
-                        >
-                          Move Place
-                        </button>
-                        <button
-                          type="button"
-                          class={`px-3 py-2 rounded text-sm text-left ${
-                            props.transformChoice === 'delete'
-                              ? 'bg-sky-400 text-white'
-                              : 'bg-sky-100 hover:bg-sky-200'
-                          }`}
-                          onClick={() => props.onTransformChoice('delete')}
-                          disabled={!props.selectedPlaceId}
-                        >
-                          Delete Place
-                        </button>
+                        {props.availableTransforms.map((t) => (
+                          <button
+                            type="button"
+                            class={`px-3 py-2 rounded text-sm text-left ${
+                              props.transformChoice === t.id
+                                ? 'bg-sky-400 text-white'
+                                : 'bg-sky-100 hover:bg-sky-200'
+                            }`}
+                            onClick={() => props.onTransformChoice(t.id)}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
                       </div>
                       {props.transformChoice && (
                         <button
@@ -236,11 +221,13 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
 
                   {p.id === 'execute' && step() === 'execute' && (
                     <div class="flex flex-col gap-2">
-                      {props.transformChoice === 'add' && (
+                      {(props.transformChoice === 'add' ||
+                        props.transformChoice === 'addRelated') && (
                         <>
                           <p class="text-sm text-slate-600">
-                            Click anywhere on the canvas to add a Place. Drag to
-                            reposition. Continue when ready.
+                            {props.transformChoice === 'addRelated'
+                              ? 'Click to add a related Place (child of selected). Drag to reposition. Continue when ready.'
+                              : 'Click anywhere on the canvas to add a Place. Drag to reposition. Continue when ready.'}
                           </p>
                           {props.pendingAdd ? (
                             <button
@@ -282,6 +269,23 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                           >
                             Continue
                           </button>
+                        </>
+                      )}
+                      {props.transformChoice === 'rotate' && (
+                        <>
+                          <p class="text-sm text-slate-600">
+                            Drag the orientation axis to rotate. Related places
+                            will rotate around this place. Continue when ready.
+                          </p>
+                          {props.pendingRotate ? (
+                            <button
+                              type="button"
+                              class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
+                              onClick={() => props.onStepExecuteToComplete?.()}
+                            >
+                              Continue
+                            </button>
+                          ) : null}
                         </>
                       )}
                       <button

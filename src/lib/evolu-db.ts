@@ -21,7 +21,8 @@ export type TransformationId = typeof TransformationId.Type;
 const AddKind = literal('add');
 const MoveKind = literal('move');
 const DeleteKind = literal('delete');
-const TransformationKind = union(AddKind, MoveKind, DeleteKind);
+const RotateKind = literal('rotate');
+const TransformationKind = union(AddKind, MoveKind, DeleteKind, RotateKind);
 export type TransformationKind = typeof TransformationKind.Type;
 
 export const Schema = {
@@ -30,6 +31,7 @@ export const Schema = {
     parentId: nullOr(PlaceId),
     x: FiniteNumber,
     y: FiniteNumber,
+    angle: nullOr(FiniteNumber),
   },
   transformation: {
     id: TransformationId,
@@ -38,6 +40,7 @@ export const Schema = {
     parentId: nullOr(PlaceId),
     x: nullOr(FiniteNumber),
     y: nullOr(FiniteNumber),
+    angle: nullOr(FiniteNumber),
   },
 } satisfies EvoluSchema;
 
