@@ -1,8 +1,15 @@
-import type { PlaceId } from './evolu-db';
+import type { LineSegmentId, PlaceId } from './evolu-db';
 
-export type SelectionType = 'drawingPane' | 'place';
+export type SelectionType = 'drawingPane' | 'place' | 'lineSegment';
 
-export type TransformId = 'add' | 'addRelated' | 'move' | 'delete' | 'rotate';
+export type TransformId =
+  | 'add'
+  | 'addRelated'
+  | 'addLine'
+  | 'move'
+  | 'delete'
+  | 'deleteLine'
+  | 'rotate';
 
 export type TransformChoice = TransformId | null;
 
@@ -23,8 +30,14 @@ export const TRANSFORMS: readonly TransformDef[] = [
     label: 'Add a Related Place',
     allowedSelectionTypes: ['place'],
   },
+  { id: 'addLine', label: 'Add Line', allowedSelectionTypes: ['place'] },
   { id: 'move', label: 'Move Place', allowedSelectionTypes: ['place'] },
   { id: 'delete', label: 'Delete Place', allowedSelectionTypes: ['place'] },
+  {
+    id: 'deleteLine',
+    label: 'Delete Line',
+    allowedSelectionTypes: ['lineSegment'],
+  },
   { id: 'rotate', label: 'Rotate Place', allowedSelectionTypes: ['place'] },
 ];
 
@@ -34,9 +47,11 @@ export const TRANSFORMS: readonly TransformDef[] = [
 export function getSelectionType(
   hasDrawingPaneSelected: boolean,
   selectedPlaceId: PlaceId | null,
+  selectedLineSegmentId: LineSegmentId | null,
 ): SelectionType | null {
   if (hasDrawingPaneSelected) return 'drawingPane';
   if (selectedPlaceId) return 'place';
+  if (selectedLineSegmentId) return 'lineSegment';
   return null;
 }
 

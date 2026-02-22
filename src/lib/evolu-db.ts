@@ -15,6 +15,12 @@ import { createUseEvolu } from './evolu';
 const PlaceId = id('Place');
 export type PlaceId = typeof PlaceId.Type;
 
+const LineSegmentEndId = id('LineSegmentEnd');
+export type LineSegmentEndId = typeof LineSegmentEndId.Type;
+
+const LineSegmentId = id('LineSegment');
+export type LineSegmentId = typeof LineSegmentId.Type;
+
 const TransformationId = id('Transformation');
 export type TransformationId = typeof TransformationId.Type;
 
@@ -32,6 +38,15 @@ export const Schema = {
     x: FiniteNumber,
     y: FiniteNumber,
     angle: nullOr(FiniteNumber),
+  },
+  lineSegmentEnd: {
+    id: LineSegmentEndId,
+    placeId: PlaceId,
+  },
+  lineSegment: {
+    id: LineSegmentId,
+    endAId: LineSegmentEndId,
+    endBId: LineSegmentEndId,
   },
   transformation: {
     id: TransformationId,
@@ -63,6 +78,26 @@ export const allPlacesQuery = evolu.createQuery((db) =>
 export const allTransformationsQuery = evolu.createQuery((db) =>
   db
     .selectFrom('transformation')
+    .selectAll()
+    .where((eb) =>
+      eb.or([eb('isDeleted', 'is', null), eb('isDeleted', '=', 0)]),
+    )
+    .orderBy('createdAt'),
+);
+
+export const allLineSegmentEndsQuery = evolu.createQuery((db) =>
+  db
+    .selectFrom('lineSegmentEnd')
+    .selectAll()
+    .where((eb) =>
+      eb.or([eb('isDeleted', 'is', null), eb('isDeleted', '=', 0)]),
+    )
+    .orderBy('createdAt'),
+);
+
+export const allLineSegmentsQuery = evolu.createQuery((db) =>
+  db
+    .selectFrom('lineSegment')
     .selectAll()
     .where((eb) =>
       eb.or([eb('isDeleted', 'is', null), eb('isDeleted', '=', 0)]),

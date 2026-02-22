@@ -12,16 +12,24 @@ import {
   getRelationshipSegments,
 } from './lib/drawingRelations';
 import {
+  allLineSegmentEndsQuery,
+  allLineSegmentsQuery,
   allPlacesQuery,
   allTransformationsQuery,
+  type LineSegmentEndId,
+  type LineSegmentId,
   type PlaceId,
   useEvolu,
 } from './lib/evolu-db';
+import type { LineSegmentWithPositions } from './lib/lineSegmentHit';
+import { findLineSegmentAt } from './lib/lineSegmentHit';
 import {
   availableTransforms as getAvailableTransforms,
   getSelectionType,
 } from './lib/transform-matrix';
 import { useQuery } from './lib/useQuery';
+
+const LINE_SEGMENT_HIT_THRESHOLD = 12;
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
@@ -38,6 +46,8 @@ const App: Component = () => {
   const evolu = useEvolu();
   const placesRows = useQuery(allPlacesQuery);
   const transformationsRows = useQuery(allTransformationsQuery);
+  const lineSegmentEndsRows = useQuery(allLineSegmentEndsQuery);
+  const lineSegmentsRows = useQuery(allLineSegmentsQuery);
   let svg!: SVGSVGElement;
 
   const [scale, setScale] = createSignal(1);
@@ -52,6 +62,8 @@ const App: Component = () => {
   const [selectedPlaceId, setSelectedPlaceId] = createSignal<PlaceId | null>(
     null,
   );
+  const [selectedLineSegmentId, setSelectedLineSegmentId] =
+    createSignal<LineSegmentId | null>(null);
   const [transformChoice, setTransformChoice] =
     createSignal<TransformChoice>(null);
   const [hasDrawingPaneSelected, setHasDrawingPaneSelected] =
@@ -61,6 +73,7 @@ const App: Component = () => {
     const selectionType = getSelectionType(
       hasDrawingPaneSelected(),
       selectedPlaceId(),
+      selectedLineSegmentId(),
     );
     return getAvailableTransforms(selectionType);
   });
@@ -81,8 +94,18 @@ const App: Component = () => {
     placeId: PlaceId;
     angle: number;
   } | null>(null);
+  const [pendingAddLine, setPendingAddLine] = createSignal<{
+    startPlaceId: PlaceId;
+    startEndId: LineSegmentEndId;
+    cursorX: number;
+    cursorY: number;
+  } | null>(null);
+  const [pendingDeleteLineId, setPendingDeleteLineId] =
+    createSignal<LineSegmentId | null>(null);
 
   const places = () => placesRows();
+  const lineSegmentEnds = () => lineSegmentEndsRows();
+  const lineSegments = () => lineSegmentsRows();
 
   type PlaceLike = {
     id: PlaceId;
@@ -194,6 +217,49 @@ const App: Component = () => {
   const findPlaceAt = (cx: number, cy: number) =>
     placesWithAbsolutePositions().find((p) => isPlaceAt(cx, cy, p));
 
+  const lineSegmentsWithPositions = (): LineSegmentWithPositions[] => {
+    const pl = places();
+    const ends = lineSegmentEnds();
+    const segs = lineSegments();
+    const pm = pendingMove();
+    const moveOverride =
+      pm && pm.placeId !== 'pending'
+        ? { placeId: pm.placeId, x: pm.x, y: pm.y }
+        : null;
+    const getPlaceAbs = (placeId: PlaceId) => {
+      const place = pl.find((p) => p.id === placeId);
+      if (!place) return null;
+      const abs = getAbsolutePosition(place, pl, moveOverride, null);
+      return { x: abs.x, y: abs.y };
+    };
+    return segs
+      .map((seg) => {
+        const endA = ends.find((e) => e.id === seg.endAId);
+        const endB = ends.find((e) => e.id === seg.endBId);
+        if (!endA || !endB || endA.placeId == null || endB.placeId == null)
+          return null;
+        const posA = getPlaceAbs(endA.placeId);
+        const posB = getPlaceAbs(endB.placeId);
+        if (!posA || !posB) return null;
+        return {
+          id: seg.id,
+          x1: posA.x,
+          y1: posA.y,
+          x2: posB.x,
+          y2: posB.y,
+        };
+      })
+      .filter((s): s is LineSegmentWithPositions => s != null);
+  };
+
+  const findLineSegmentAtCursor = (cx: number, cy: number) =>
+    findLineSegmentAt(
+      cx,
+      cy,
+      lineSegmentsWithPositions(),
+      LINE_SEGMENT_HIT_THRESHOLD,
+    );
+
   const ORIENTATION_AXIS_LENGTH = 120;
   const isPointNearAxis = (
     px: number,
@@ -231,10 +297,19 @@ const App: Component = () => {
     if (gs === 'select') {
       if (hit) {
         setSelectedPlaceId(hit.id);
+        setSelectedLineSegmentId(null);
         setHasDrawingPaneSelected(false);
       } else {
-        setSelectedPlaceId(null);
-        setHasDrawingPaneSelected(true);
+        const lineHit = findLineSegmentAtCursor(cx, cy);
+        if (lineHit) {
+          setSelectedLineSegmentId(lineHit);
+          setSelectedPlaceId(null);
+          setHasDrawingPaneSelected(false);
+        } else {
+          setSelectedPlaceId(null);
+          setSelectedLineSegmentId(null);
+          setHasDrawingPaneSelected(true);
+        }
       }
       return;
     }
@@ -276,18 +351,81 @@ const App: Component = () => {
         }
       }
     }
+
+    if (gs === 'execute' && tc === 'addLine') {
+      const pal = pendingAddLine();
+      if (!pal) return;
+      if (hit && hit.id !== pal.startPlaceId) {
+        const endBRes = evolu.insert('lineSegmentEnd', { placeId: hit.id });
+        if (endBRes.ok) {
+          evolu.insert('lineSegment', {
+            endAId: pal.startEndId,
+            endBId: endBRes.value.id,
+          });
+          setPendingAddLine(null);
+        }
+        return;
+      }
+      if (!hit) {
+        const startPlaceId = pal.startPlaceId;
+        const parent = places().find((p) => p.id === startPlaceId);
+        const parentList = places();
+        let x = cx;
+        let y = cy;
+        if (parent) {
+          const parentRes = getAbsolutePosition(parent, parentList);
+          const worldOffset = { x: cx - parentRes.x, y: cy - parentRes.y };
+          const local = rotateBy(
+            -parentRes.worldAngle,
+            worldOffset.x,
+            worldOffset.y,
+          );
+          x = local.x;
+          y = local.y;
+        }
+        const placeRes = evolu.insert('place', {
+          parentId: startPlaceId,
+          x,
+          y,
+        });
+        if (placeRes.ok) {
+          const endBRes = evolu.insert('lineSegmentEnd', {
+            placeId: placeRes.value.id,
+          });
+          if (endBRes.ok) {
+            evolu.insert('lineSegment', {
+              endAId: pal.startEndId,
+              endBId: endBRes.value.id,
+            });
+            setPendingAddLine(null);
+            setPendingMove({
+              placeId: placeRes.value.id,
+              x: cx,
+              y: cy,
+            });
+          }
+        }
+      }
+    }
   };
 
   const handlePointerMove = (e: PointerEvent) => {
     const pm = pendingMove();
     const pr = pendingRotate();
     const pa = pendingAdd();
+    const pal = pendingAddLine();
+    const { x: cx, y: cy } = screenToCanvas(e.clientX, e.clientY);
+    if (pal && guideStep() === 'execute' && mode() === 'default') {
+      setPendingAddLine({ ...pal, cursorX: cx, cursorY: cy });
+    }
     if (pm && guideStep() === 'execute' && mode() === 'default') {
-      const { x: cx, y: cy } = screenToCanvas(e.clientX, e.clientY);
       if (pm.placeId === 'pending' && pa) {
         setPendingAdd({ ...pa, x: cx, y: cy });
         setPendingMove({ placeId: 'pending', x: cx, y: cy });
-      } else if (transformChoice() === 'move') {
+      } else if (
+        transformChoice() === 'move' ||
+        transformChoice() === 'addLine'
+      ) {
         setPendingMove({ placeId: pm.placeId, x: cx, y: cy });
       }
     }
@@ -353,7 +491,10 @@ const App: Component = () => {
       setPendingMove(null);
       setPendingDeletePlaceId(null);
       setPendingRotate(null);
+      setPendingAddLine(null);
+      setPendingDeleteLineId(null);
       setSelectedPlaceId(null);
+      setSelectedLineSegmentId(null);
       setHasDrawingPaneSelected(false);
     });
   };
@@ -366,6 +507,28 @@ const App: Component = () => {
     const choice = transformChoice();
     if (choice === 'delete' && selectedPlaceId()) {
       setPendingDeletePlaceId(selectedPlaceId());
+    }
+    if (choice === 'deleteLine' && selectedLineSegmentId()) {
+      setPendingDeleteLineId(selectedLineSegmentId());
+    }
+    if (choice === 'addLine') {
+      const startPlaceId = selectedPlaceId();
+      if (startPlaceId) {
+        const r = evolu.insert('lineSegmentEnd', { placeId: startPlaceId });
+        if (r.ok) {
+          const startPlace = placesWithAbsolutePositions().find(
+            (p) => p.id === startPlaceId,
+          );
+          const cx = startPlace?.absX ?? 0;
+          const cy = startPlace?.absY ?? 0;
+          setPendingAddLine({
+            startPlaceId,
+            startEndId: r.value.id,
+            cursorX: cx,
+            cursorY: cy,
+          });
+        }
+      }
     }
     setGuideStep('execute');
   };
@@ -488,6 +651,18 @@ const App: Component = () => {
       setPendingRotate(null);
     }
 
+    const delLine = pendingDeleteLineId();
+    if (delLine) {
+      const seg = lineSegments().find((s) => s.id === delLine);
+      if (seg && seg.endAId != null && seg.endBId != null) {
+        evolu.update('lineSegment', { id: delLine, isDeleted: true });
+        evolu.update('lineSegmentEnd', { id: seg.endAId, isDeleted: true });
+        evolu.update('lineSegmentEnd', { id: seg.endBId, isDeleted: true });
+      }
+      setPendingDeleteLineId(null);
+    }
+
+    setPendingAddLine(null);
     resetGuide();
   };
 
@@ -498,6 +673,12 @@ const App: Component = () => {
   const resetDrawing = () => {
     for (const p of places()) {
       evolu.update('place', { id: p.id, isDeleted: true });
+    }
+    for (const e of lineSegmentEnds()) {
+      evolu.update('lineSegmentEnd', { id: e.id, isDeleted: true });
+    }
+    for (const s of lineSegments()) {
+      evolu.update('lineSegment', { id: s.id, isDeleted: true });
     }
     for (const t of transformationsRows()) {
       evolu.update('transformation', { id: t.id, isDeleted: true });
@@ -562,6 +743,23 @@ const App: Component = () => {
     { passive: false },
   );
 
+  createEventListener(
+    () => svg,
+    'pointermove',
+    (e) => {
+      const pal = pendingAddLine();
+      if (
+        pal &&
+        guideStep() === 'execute' &&
+        transformChoice() === 'addLine' &&
+        mode() === 'default'
+      ) {
+        const { x: cx, y: cy } = screenToCanvas(e.clientX, e.clientY);
+        setPendingAddLine({ ...pal, cursorX: cx, cursorY: cy });
+      }
+    },
+  );
+
   const pointers = new Map<number, { x: number; y: number }>();
   let prevPinchDist = 0;
 
@@ -587,6 +785,7 @@ const App: Component = () => {
           (pm &&
             gs === 'execute' &&
             (tc === 'move' ||
+              tc === 'addLine' ||
               ((tc === 'add' || tc === 'addRelated') &&
                 pm.placeId === 'pending'))) ||
           (pr && gs === 'execute' && tc === 'rotate');
@@ -724,6 +923,50 @@ const App: Component = () => {
                   </g>
                 );
               })()}
+            {lineSegmentsWithPositions().map((seg) => {
+              const isSelected = seg.id === selectedLineSegmentId();
+              const stroke = isSelected ? 'darkorange' : '#374151';
+              const strokeWidth = isSelected ? 3 : 2;
+              return (
+                <g class="cursor-pointer">
+                  <line
+                    x1={seg.x1}
+                    y1={seg.y1}
+                    x2={seg.x2}
+                    y2={seg.y2}
+                    stroke={stroke}
+                    stroke-width={strokeWidth}
+                  />
+                  <line
+                    x1={seg.x1}
+                    y1={seg.y1}
+                    x2={seg.x2}
+                    y2={seg.y2}
+                    stroke="transparent"
+                    stroke-width={LINE_SEGMENT_HIT_THRESHOLD * 2}
+                  />
+                </g>
+              );
+            })}
+            {(() => {
+              const pal = pendingAddLine();
+              if (!pal) return null;
+              const startPlace = placesWithAbsolutePositions().find(
+                (p) => p.id === pal.startPlaceId,
+              );
+              return (
+                <line
+                  x1={startPlace?.absX ?? pal.cursorX}
+                  y1={startPlace?.absY ?? pal.cursorY}
+                  x2={pal.cursorX}
+                  y2={pal.cursorY}
+                  stroke="#374151"
+                  stroke-width={2}
+                  stroke-dasharray="4 4"
+                  style={{ 'pointer-events': 'none' }}
+                />
+              );
+            })()}
             {relationshipSegments().map((seg, i) => {
               const dx = seg.to.x - seg.from.x;
               const dy = seg.to.y - seg.from.y;
@@ -875,6 +1118,7 @@ const App: Component = () => {
         <DrawingGuide
           step={guideStep}
           selectedPlaceId={selectedPlaceId()}
+          selectedLineSegmentId={selectedLineSegmentId()}
           transformChoice={transformChoice()}
           onStepObserve={resetGuide}
           onStepSelect={() => setGuideStep('select')}
@@ -884,6 +1128,7 @@ const App: Component = () => {
           onSelectCanvas={() => {
             setHasDrawingPaneSelected(true);
             setSelectedPlaceId(null);
+            setSelectedLineSegmentId(null);
           }}
           onTransformChoice={handleTransformChoice}
           onCommit={handleCommit}
@@ -893,6 +1138,8 @@ const App: Component = () => {
           pendingAdd={!!pendingAdd()}
           pendingMove={!!pendingMove()}
           pendingRotate={!!pendingRotate()}
+          pendingAddLine={!!pendingAddLine()}
+          pendingDeleteLineId={!!pendingDeleteLineId()}
           availableTransforms={availableTransformsList()}
         />
         <hr class="border-sky-300" />

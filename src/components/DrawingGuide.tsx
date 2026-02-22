@@ -1,5 +1,5 @@
 import type { Accessor, Component } from 'solid-js';
-import type { PlaceId } from '../lib/evolu-db';
+import type { LineSegmentId, PlaceId } from '../lib/evolu-db';
 import type { TransformChoice } from '../lib/transform-matrix';
 
 export type GuideStep =
@@ -14,6 +14,7 @@ export type { TransformChoice };
 interface DrawingGuideProps {
   step: Accessor<GuideStep>;
   selectedPlaceId: PlaceId | null;
+  selectedLineSegmentId: LineSegmentId | null;
   transformChoice: TransformChoice;
   onStepObserve: () => void;
   onStepSelect: () => void;
@@ -29,6 +30,8 @@ interface DrawingGuideProps {
   pendingAdd: boolean;
   pendingMove: boolean;
   pendingRotate: boolean;
+  pendingAddLine: boolean;
+  pendingDeleteLineId: boolean;
   availableTransforms: readonly {
     id: NonNullable<TransformChoice>;
     label: string;
@@ -62,13 +65,16 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
     if (phaseId === 'select') {
       if (props.hasDrawingPaneSelected) return 'Canvas (Drawing Pane)';
       if (props.selectedPlaceId) return 'Place';
+      if (props.selectedLineSegmentId) return 'Line segment';
       return null;
     }
     if (phaseId === 'transform') {
       if (props.transformChoice === 'add') return 'Add Place';
       if (props.transformChoice === 'addRelated') return 'Add a Related Place';
+      if (props.transformChoice === 'addLine') return 'Add Line';
       if (props.transformChoice === 'move') return 'Move Place';
       if (props.transformChoice === 'delete') return 'Delete Place';
+      if (props.transformChoice === 'deleteLine') return 'Delete Line';
       if (props.transformChoice === 'rotate') return 'Rotate Place';
       return null;
     }
@@ -78,8 +84,10 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
         if (props.transformChoice === 'add') return 'Click to add';
         if (props.transformChoice === 'addRelated')
           return 'Click to add related';
+        if (props.transformChoice === 'addLine') return 'Place other end';
         if (props.transformChoice === 'move') return 'Drag to move';
         if (props.transformChoice === 'delete') return 'Confirm delete';
+        if (props.transformChoice === 'deleteLine') return 'Confirm delete';
         if (props.transformChoice === 'rotate') return 'Drag axis to rotate';
       }
       return null;
@@ -157,11 +165,13 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                         </button>
                         <p class="text-xs text-slate-500">— or —</p>
                         <p class="text-sm text-slate-600">
-                          Click a Place on the canvas to select it.
+                          Click a Place or a line segment on the canvas to
+                          select it.
                         </p>
                       </div>
                       {(props.hasDrawingPaneSelected ||
-                        props.selectedPlaceId) && (
+                        props.selectedPlaceId ||
+                        props.selectedLineSegmentId) && (
                         <button
                           type="button"
                           class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
@@ -261,6 +271,38 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                         <>
                           <p class="text-sm text-slate-600">
                             This place will be deleted. Continue to confirm.
+                          </p>
+                          <button
+                            type="button"
+                            class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
+                            onClick={() => props.onStepExecuteToComplete?.()}
+                          >
+                            Continue
+                          </button>
+                        </>
+                      )}
+                      {props.transformChoice === 'addLine' && (
+                        <>
+                          <p class="text-sm text-slate-600">
+                            Click on a place or the canvas to place the other
+                            end. If you placed a new place, drag it to
+                            reposition. Continue when ready.
+                          </p>
+                          {!props.pendingAddLine ? (
+                            <button
+                              type="button"
+                              class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
+                              onClick={() => props.onStepExecuteToComplete?.()}
+                            >
+                              Continue
+                            </button>
+                          ) : null}
+                        </>
+                      )}
+                      {props.transformChoice === 'deleteLine' && (
+                        <>
+                          <p class="text-sm text-slate-600">
+                            This line will be deleted. Continue to confirm.
                           </p>
                           <button
                             type="button"
