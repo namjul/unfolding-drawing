@@ -1,4 +1,5 @@
 import type { Component } from 'solid-js';
+import { viewControls } from '../styles/tokens';
 
 type Mode = 'default' | 'pan';
 
@@ -19,10 +20,10 @@ const ViewControls: Component<ViewControlsProps> = (props) => {
   const canReset = () => props.scale !== 1;
 
   return (
-    <div class="flex flex-col gap-2">
+    <div class={viewControls.root}>
       <button
         type="button"
-        class="px-3 py-1 bg-sky-200 hover:bg-sky-300 disabled:opacity-40 disabled:cursor-not-allowed rounded"
+        class={viewControls.buttonPrimary}
         onClick={props.onZoomIn}
         disabled={!props.canZoomIn}
       >
@@ -30,7 +31,7 @@ const ViewControls: Component<ViewControlsProps> = (props) => {
       </button>
       <button
         type="button"
-        class="px-3 py-1 bg-sky-100 hover:bg-sky-200 disabled:cursor-default rounded text-sm"
+        class={viewControls.buttonSecondary}
         onClick={props.onResetZoom}
         disabled={!canReset()}
         title="Reset zoom"
@@ -39,29 +40,29 @@ const ViewControls: Component<ViewControlsProps> = (props) => {
       </button>
       <button
         type="button"
-        class="px-3 py-1 bg-sky-200 hover:bg-sky-300 disabled:opacity-40 disabled:cursor-not-allowed rounded"
+        class={viewControls.buttonPrimary}
         onClick={props.onZoomOut}
         disabled={!props.canZoomOut}
       >
         −
       </button>
-      <hr class="my-2 border-sky-300" />
+      <hr class={viewControls.divider} />
       <button
         type="button"
-        class={`px-3 py-1 rounded ${
+        class={
           props.mode === 'pan'
-            ? 'bg-sky-500 text-white'
-            : 'bg-sky-200 hover:bg-sky-300'
-        }`}
+            ? viewControls.buttonActive
+            : viewControls.buttonInactive
+        }
         onClick={props.onTogglePan}
         title="Toggle pan mode (hold Space for temporary pan)"
       >
         Pan
       </button>
-      <hr class="my-2 border-sky-300" />
+      <hr class={viewControls.divider} />
       <button
         type="button"
-        class="px-3 py-1 bg-amber-200 hover:bg-amber-300 rounded text-sm"
+        class={viewControls.buttonReset}
         onClick={props.onResetDrawing}
         title="Reset drawing and start over"
       >

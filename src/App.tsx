@@ -1,12 +1,17 @@
+import { String1000 } from '@evolu/common';
 import { createEventListener } from '@solid-primitives/event-listener';
 import { createShortcut } from '@solid-primitives/keyboard';
 import { createPerPointerListeners } from '@solid-primitives/pointer';
-import { batch, type Component, createMemo, createSignal } from 'solid-js';
+import {
+  batch,
+  type Component,
+  createEffect,
+  createMemo,
+  createSignal,
+} from 'solid-js';
+import DrawingDNAPane from './components/DrawingDNAPane';
 import type { GuideStep, TransformChoice } from './components/DrawingGuide';
 import DrawingGuide from './components/DrawingGuide';
-import DrawingObjectsList from './components/DrawingObjectsList';
-import TransformationsList from './components/TransformationsList';
-import ViewControls from './components/ViewControls';
 import {
   getRelatedPlaceIds,
   getRelationshipSegments,
@@ -21,6 +26,7 @@ import {
   type PlaceId,
   useEvolu,
 } from './lib/evolu-db';
+import { lineSegmentEndDisplayName } from './lib/lineSegmentEndName';
 import type { LineSegmentWithPositions } from './lib/lineSegmentHit';
 import { findLineSegmentAt } from './lib/lineSegmentHit';
 import {
@@ -28,6 +34,7 @@ import {
   getSelectionType,
 } from './lib/transform-matrix';
 import { useQuery } from './lib/useQuery';
+import { classes, svg as svgTokens } from './styles/tokens';
 
 const LINE_SEGMENT_HIT_THRESHOLD = 12;
 
@@ -107,6 +114,46 @@ const App: Component = () => {
   const lineSegmentEnds = () => lineSegmentEndsRows();
   const lineSegments = () => lineSegmentsRows();
 
+  createEffect(() => {
+    const isEmpty = places().length === 0 && lineSegments().length === 0;
+    if (isEmpty && guideStep() === 'observe') {
+      batch(() => {
+        setHasDrawingPaneSelected(true);
+        setSelectedPlaceId(null);
+        setSelectedLineSegmentId(null);
+        setGuideStep('transform');
+      });
+    }
+  });
+
+  function nextPlaceName(
+    placesList: ReadonlyArray<{ name: string | null }>,
+  ): string {
+    const placeNumPattern = /^Place (\d+)$/;
+    let max = 0;
+    for (const p of placesList) {
+      const name = p.name?.trim();
+      if (!name) continue;
+      const m = placeNumPattern.exec(name);
+      if (m && m[1] != null) max = Math.max(max, Number.parseInt(m[1], 10));
+    }
+    return `Place ${max + 1}`;
+  }
+
+  function nextLineSegmentName(
+    segmentsList: ReadonlyArray<{ name: string | null }>,
+  ): string {
+    const lineNumPattern = /^Line (\d+)$/;
+    let max = 0;
+    for (const s of segmentsList) {
+      const name = s.name?.trim();
+      if (!name) continue;
+      const m = lineNumPattern.exec(name);
+      if (m && m[1] != null) max = Math.max(max, Number.parseInt(m[1], 10));
+    }
+    return `Line ${max + 1}`;
+  }
+
   type PlaceLike = {
     id: PlaceId;
     parentId: PlaceId | null;
@@ -132,11 +179,21 @@ const App: Component = () => {
     angleOverride?: { placeId: PlaceId; angle: number } | null,
   ): { x: number; y: number; worldAngle: number } => {
     if (moveOverride && place.id === moveOverride.placeId) {
-      const baseAngle =
-        angleOverride?.placeId === place.id
-          ? angleOverride.angle
-          : (place.angle ?? 0);
-      return { x: moveOverride.x, y: moveOverride.y, worldAngle: baseAngle };
+      const localAngle = place.angle ?? 0;
+      let worldAngle = localAngle;
+      if (place.parentId !== null) {
+        const parent = placesList.find((p) => p.id === place.parentId);
+        if (parent) {
+          const parentRes = getAbsolutePosition(
+            parent,
+            placesList,
+            moveOverride,
+            angleOverride,
+          );
+          worldAngle = parentRes.worldAngle + localAngle;
+        }
+      }
+      return { x: moveOverride.x, y: moveOverride.y, worldAngle };
     }
     if (place.parentId === null) {
       const worldAngle =
@@ -169,10 +226,14 @@ const App: Component = () => {
     const parentWorldAngle = parentRes.worldAngle;
     const localOffset = { x: place.x ?? 0, y: place.y ?? 0 };
     const rotated = rotateBy(parentWorldAngle, localOffset.x, localOffset.y);
+    const worldAngle =
+      angleOverride?.placeId === place.id
+        ? angleOverride.angle
+        : parentWorldAngle + placeEffectiveAngle;
     return {
       x: parentRes.x + rotated.x,
       y: parentRes.y + rotated.y,
-      worldAngle: parentWorldAngle + placeEffectiveAngle,
+      worldAngle,
     };
   };
 
@@ -187,7 +248,7 @@ const App: Component = () => {
     const angleOverride = pr ? { placeId: pr.placeId, angle: pr.angle } : null;
     return pl.map((p) => {
       const abs = getAbsolutePosition(p, pl, moveOverride, angleOverride);
-      return { ...p, absX: abs.x, absY: abs.y };
+      return { ...p, absX: abs.x, absY: abs.y, absWorldAngle: abs.worldAngle };
     });
   };
 
@@ -294,7 +355,7 @@ const App: Component = () => {
     const { x: cx, y: cy } = screenToCanvas(e.clientX, e.clientY);
     const hit = findPlaceAt(cx, cy);
 
-    if (gs === 'select') {
+    if (gs === 'select' || gs === 'transform') {
       if (hit) {
         setSelectedPlaceId(hit.id);
         setSelectedLineSegmentId(null);
@@ -310,6 +371,9 @@ const App: Component = () => {
           setSelectedLineSegmentId(null);
           setHasDrawingPaneSelected(true);
         }
+      }
+      if (gs === 'select') {
+        setGuideStep('transform');
       }
       return;
     }
@@ -341,7 +405,7 @@ const App: Component = () => {
       if (selId) {
         const place = placesWithAbsolutePositions().find((p) => p.id === selId);
         if (place) {
-          const theta = pendingRotate()?.angle ?? place.angle ?? 0;
+          const theta = pendingRotate()?.angle ?? place.absWorldAngle ?? 0;
           if (isPointNearAxis(cx, cy, place.absX, place.absY, theta)) {
             setPendingRotate({
               placeId: selId,
@@ -358,10 +422,37 @@ const App: Component = () => {
       if (hit && hit.id !== pal.startPlaceId) {
         const endBRes = evolu.insert('lineSegmentEnd', { placeId: hit.id });
         if (endBRes.ok) {
+          const lineName = nextLineSegmentName(lineSegments());
+          const nameResult = String1000.from(lineName);
+          const placeNameA =
+            places()
+              .find((p) => p.id === pal.startPlaceId)
+              ?.name?.trim() || 'Place';
+          const placeNameB =
+            places()
+              .find((p) => p.id === hit.id)
+              ?.name?.trim() || 'Place';
           evolu.insert('lineSegment', {
             endAId: pal.startEndId,
             endBId: endBRes.value.id,
+            ...(nameResult.ok && { name: nameResult.value }),
           });
+          const endAName = String1000.from(
+            lineSegmentEndDisplayName(lineName, placeNameA),
+          );
+          const endBName = String1000.from(
+            lineSegmentEndDisplayName(lineName, placeNameB),
+          );
+          if (endAName.ok)
+            evolu.update('lineSegmentEnd', {
+              id: pal.startEndId,
+              name: endAName.value,
+            });
+          if (endBName.ok)
+            evolu.update('lineSegmentEnd', {
+              id: endBRes.value.id,
+              name: endBName.value,
+            });
           setPendingAddLine(null);
         }
         return;
@@ -383,20 +474,46 @@ const App: Component = () => {
           x = local.x;
           y = local.y;
         }
+        const defaultName = nextPlaceName(places());
+        const nameResult = String1000.from(defaultName);
         const placeRes = evolu.insert('place', {
           parentId: startPlaceId,
           x,
           y,
+          ...(nameResult.ok && { name: nameResult.value }),
         });
         if (placeRes.ok) {
           const endBRes = evolu.insert('lineSegmentEnd', {
             placeId: placeRes.value.id,
           });
           if (endBRes.ok) {
+            const lineName = nextLineSegmentName(lineSegments());
+            const segNameResult = String1000.from(lineName);
+            const placeNameA =
+              places()
+                .find((p) => p.id === pal.startPlaceId)
+                ?.name?.trim() || 'Place';
             evolu.insert('lineSegment', {
               endAId: pal.startEndId,
               endBId: endBRes.value.id,
+              ...(segNameResult.ok && { name: segNameResult.value }),
             });
+            const endAName = String1000.from(
+              lineSegmentEndDisplayName(lineName, placeNameA),
+            );
+            const endBName = String1000.from(
+              lineSegmentEndDisplayName(lineName, defaultName),
+            );
+            if (endAName.ok)
+              evolu.update('lineSegmentEnd', {
+                id: pal.startEndId,
+                name: endAName.value,
+              });
+            if (endBName.ok)
+              evolu.update('lineSegmentEnd', {
+                id: endBRes.value.id,
+                name: endBName.value,
+              });
             setPendingAddLine(null);
             setPendingMove({
               placeId: placeRes.value.id,
@@ -501,10 +618,6 @@ const App: Component = () => {
 
   const handleTransformChoice = (choice: TransformChoice) => {
     setTransformChoice(choice);
-  };
-
-  const handleStepTransformToExecute = () => {
-    const choice = transformChoice();
     if (choice === 'delete' && selectedPlaceId()) {
       setPendingDeletePlaceId(selectedPlaceId());
     }
@@ -533,8 +646,26 @@ const App: Component = () => {
     setGuideStep('execute');
   };
 
-  const handleStepExecuteToComplete = () => {
-    setGuideStep('complete');
+  const goToSelectStep = () => {
+    setGuideStep('select');
+    setTransformChoice(null);
+    setPendingAdd(null);
+    setPendingMove(null);
+    setPendingDeletePlaceId(null);
+    setPendingRotate(null);
+    setPendingAddLine(null);
+    setPendingDeleteLineId(null);
+    setSelectedPlaceId(null);
+    setSelectedLineSegmentId(null);
+    setHasDrawingPaneSelected(false);
+  };
+
+  const handleCancelSelection = () => {
+    setSelectedPlaceId(null);
+    setSelectedLineSegmentId(null);
+    setHasDrawingPaneSelected(false);
+    setTransformChoice(null);
+    setGuideStep('select');
   };
 
   const handleCommit = () => {
@@ -565,10 +696,13 @@ const App: Component = () => {
           y = local.y;
         }
       }
+      const defaultName = nextPlaceName(placesList);
+      const nameResult = String1000.from(defaultName);
       const r = evolu.insert('place', {
         parentId: add.parentId,
         x,
         y,
+        ...(nameResult.ok && { name: nameResult.value }),
       });
       if (r.ok) {
         insertedPlaceId = r.value.id;
@@ -639,14 +773,23 @@ const App: Component = () => {
     }
 
     if (rot) {
-      evolu.update('place', { id: rot.placeId, angle: rot.angle });
+      const rotatedPlace = placesList.find((p) => p.id === rot.placeId);
+      let storedAngle = rot.angle;
+      if (rotatedPlace?.parentId) {
+        const parent = placesList.find((p) => p.id === rotatedPlace.parentId);
+        if (parent) {
+          const parentRes = getAbsolutePosition(parent, placesList);
+          storedAngle = rot.angle - parentRes.worldAngle;
+        }
+      }
+      evolu.update('place', { id: rot.placeId, angle: storedAngle });
       evolu.insert('transformation', {
         kind: 'rotate',
         placeId: rot.placeId,
         parentId: null,
         x: null,
         y: null,
-        angle: rot.angle,
+        angle: storedAngle,
       });
       setPendingRotate(null);
     }
@@ -663,11 +806,11 @@ const App: Component = () => {
     }
 
     setPendingAddLine(null);
-    resetGuide();
+    goToSelectStep();
   };
 
   const handleReject = () => {
-    resetGuide();
+    goToSelectStep();
   };
 
   const resetDrawing = () => {
@@ -842,9 +985,47 @@ const App: Component = () => {
   };
 
   return (
-    <div class="flex gap-2 h-screen p-2 *:min-w-0">
-      <div class="p-2 basis-1/25 grow max-w-100 bg-sky-50">
-        <ViewControls
+    <div class={classes.appRoot}>
+      {/* Left pane: Drawing Guide */}
+      <div class={classes.pane}>
+        <DrawingGuide
+          step={guideStep}
+          selectedPlaceId={selectedPlaceId()}
+          selectedLineSegmentId={selectedLineSegmentId()}
+          transformChoice={transformChoice()}
+          onStepObserve={resetGuide}
+          onStepSelect={() => setGuideStep('select')}
+          onRequestStep={(s) => {
+            if (s === 'select') {
+              batch(() => {
+                setGuideStep(s);
+                setTransformChoice(null);
+                setSelectedPlaceId(null);
+                setSelectedLineSegmentId(null);
+                setHasDrawingPaneSelected(false);
+              });
+            } else {
+              setGuideStep(s);
+            }
+          }}
+          onCancelSelection={handleCancelSelection}
+          onSelectCanvas={() => {
+            setHasDrawingPaneSelected(true);
+            setSelectedPlaceId(null);
+            setSelectedLineSegmentId(null);
+            setGuideStep('transform');
+          }}
+          onTransformChoice={handleTransformChoice}
+          onCommit={handleCommit}
+          onReject={handleReject}
+          onReset={resetGuide}
+          hasDrawingPaneSelected={hasDrawingPaneSelected()}
+          pendingAdd={!!pendingAdd()}
+          pendingMove={!!pendingMove()}
+          pendingRotate={!!pendingRotate()}
+          pendingAddLine={!!pendingAddLine()}
+          pendingDeleteLineId={!!pendingDeleteLineId()}
+          availableTransforms={availableTransformsList()}
           scale={scale()}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
@@ -856,17 +1037,19 @@ const App: Component = () => {
           onResetDrawing={resetDrawing}
         />
       </div>
+      {/* Middle pane: Canvas */}
       <div
-        class={`p-2 basis-1/5 grow min-h-0 flex flex-col ${
-          hasDrawingPaneSelected() && guideStep() === 'select'
-            ? 'ring-2 ring-sky-500 ring-inset rounded'
+        class={`${classes.paneCanvas} ${
+          hasDrawingPaneSelected() &&
+          (guideStep() === 'select' || guideStep() === 'transform')
+            ? classes.canvasSelectedRing
             : ''
         }`}
       >
         <svg
           ref={svg}
           xmlns="http://www.w3.org/2000/svg"
-          class={`flex-1 min-h-0 w-full bg-sky-50 touch-none ${cursorClass()}`}
+          class={`${classes.canvasSvg} ${cursorClass()}`}
         >
           <title>Drawing canvas</title>
           <g
@@ -880,7 +1063,8 @@ const App: Component = () => {
                   (p) => p.id === selectedPlaceId(),
                 );
                 if (!place) return null;
-                const theta = pendingRotate()?.angle ?? place.angle ?? 0;
+                const theta =
+                  pendingRotate()?.angle ?? place.absWorldAngle ?? 0;
                 const cx = place.absX;
                 const cy = place.absY;
                 const ex = cx + ORIENTATION_AXIS_LENGTH * Math.sin(theta);
@@ -901,15 +1085,15 @@ const App: Component = () => {
                       y1={cy}
                       x2={ex}
                       y2={ey}
-                      stroke="black"
-                      stroke-width={2}
-                      stroke-dasharray="6 3"
-                      style={{ 'pointer-events': 'none' }}
+                      stroke={svgTokens.orientationAxisStroke}
+                      stroke-width={svgTokens.orientationAxisStrokeWidth}
+                      stroke-dasharray={svgTokens.orientationAxisDasharray}
+                      style={svgTokens.pointerEventsNone}
                     />
                     <path
                       d={arrowD}
-                      fill="black"
-                      style={{ 'pointer-events': 'none' }}
+                      fill={svgTokens.orientationAxisFill}
+                      style={svgTokens.pointerEventsNone}
                     />
                     <line
                       x1={cx}
@@ -918,15 +1102,19 @@ const App: Component = () => {
                       y2={ey}
                       stroke="transparent"
                       stroke-width={72}
-                      style={{ cursor: 'grab' }}
+                      style={svgTokens.cursorGrab}
                     />
                   </g>
                 );
               })()}
             {lineSegmentsWithPositions().map((seg) => {
               const isSelected = seg.id === selectedLineSegmentId();
-              const stroke = isSelected ? 'darkorange' : '#374151';
-              const strokeWidth = isSelected ? 3 : 2;
+              const stroke = isSelected
+                ? svgTokens.lineSegmentSelectedStroke
+                : svgTokens.lineSegmentDefaultStroke;
+              const strokeWidth = isSelected
+                ? svgTokens.lineSegmentSelectedWidth
+                : svgTokens.lineSegmentDefaultWidth;
               return (
                 <g class="cursor-pointer">
                   <line
@@ -960,10 +1148,10 @@ const App: Component = () => {
                   y1={startPlace?.absY ?? pal.cursorY}
                   x2={pal.cursorX}
                   y2={pal.cursorY}
-                  stroke="#374151"
-                  stroke-width={2}
-                  stroke-dasharray="4 4"
-                  style={{ 'pointer-events': 'none' }}
+                  stroke={svgTokens.pendingAddLineStroke}
+                  stroke-width={svgTokens.pendingAddLineWidth}
+                  stroke-dasharray={svgTokens.pendingAddLineDasharray}
+                  style={svgTokens.pointerEventsNone}
                 />
               );
             })()}
@@ -986,7 +1174,7 @@ const App: Component = () => {
               return (
                 <g
                   transform={`translate(${seg.from.x} ${seg.from.y})`}
-                  style={{ 'pointer-events': 'none' }}
+                  style={svgTokens.pointerEventsNone}
                 >
                   <defs>
                     <linearGradient
@@ -997,8 +1185,14 @@ const App: Component = () => {
                       x2="1"
                       y2="0.5"
                     >
-                      <stop offset="0" stop-color="#0ea5e9" />
-                      <stop offset="1" stop-color="#f0f9ff" />
+                      <stop
+                        offset="0"
+                        stop-color={svgTokens.laserGradientLeading}
+                      />
+                      <stop
+                        offset="1"
+                        stop-color={svgTokens.laserGradientTrailing}
+                      />
                     </linearGradient>
                   </defs>
                   <animateTransform
@@ -1031,8 +1225,12 @@ const App: Component = () => {
                 item.id === pid &&
                 tc === 'delete' &&
                 (gs === 'execute' || gs === 'complete');
-              const stroke = isSelected ? 'darkorange' : 'coral';
-              const strokeWidth = isSelected ? 3 : 2;
+              const stroke = isSelected
+                ? svgTokens.placeSelectedStroke
+                : svgTokens.placeDefaultStroke;
+              const strokeWidth = isSelected
+                ? svgTokens.placeSelectedStrokeWidth
+                : svgTokens.placeDefaultStrokeWidth;
               const xSize = CROSSHAIR_SIZE + 6;
               return (
                 <g class="cursor-pointer">
@@ -1043,16 +1241,16 @@ const App: Component = () => {
                         y1={item.y - xSize}
                         x2={item.x + xSize}
                         y2={item.y + xSize}
-                        stroke="red"
-                        stroke-width={3}
+                        stroke={svgTokens.deletePlaceholderStroke}
+                        stroke-width={svgTokens.deletePlaceholderStrokeWidth}
                       />
                       <line
                         x1={item.x - xSize}
                         y1={item.y + xSize}
                         x2={item.x + xSize}
                         y2={item.y - xSize}
-                        stroke="red"
-                        stroke-width={3}
+                        stroke={svgTokens.deletePlaceholderStroke}
+                        stroke-width={svgTokens.deletePlaceholderStrokeWidth}
                       />
                     </>
                   )}
@@ -1078,10 +1276,10 @@ const App: Component = () => {
                       cy={item.y}
                       r={CROSSHAIR_SIZE + 6}
                       fill="none"
-                      stroke="darkorange"
-                      stroke-width={3}
-                      stroke-dasharray="6 3"
-                      style={{ 'pointer-events': 'none' }}
+                      stroke={svgTokens.placeSelectedStroke}
+                      stroke-width={svgTokens.placeSelectedStrokeWidth}
+                      stroke-dasharray={svgTokens.placeSelectedCircleDasharray}
+                      style={svgTokens.pointerEventsNone}
                     />
                   )}
                   {isParent && !isPendingDelete && (
@@ -1090,10 +1288,10 @@ const App: Component = () => {
                       cy={item.y}
                       r={CROSSHAIR_SIZE + 6}
                       fill="none"
-                      stroke="#0ea5e9"
-                      stroke-width={2}
-                      stroke-dasharray="4 4"
-                      style={{ 'pointer-events': 'none' }}
+                      stroke={svgTokens.placeParentStroke}
+                      stroke-width={svgTokens.placeDefaultStrokeWidth}
+                      stroke-dasharray={svgTokens.placeRelationCircleDasharray}
+                      style={svgTokens.pointerEventsNone}
                     />
                   )}
                   {isChild && !isPendingDelete && (
@@ -1102,10 +1300,10 @@ const App: Component = () => {
                       cy={item.y}
                       r={CROSSHAIR_SIZE + 6}
                       fill="none"
-                      stroke="#10b981"
-                      stroke-width={2}
-                      stroke-dasharray="4 4"
-                      style={{ 'pointer-events': 'none' }}
+                      stroke={svgTokens.placeChildStroke}
+                      stroke-width={svgTokens.placeDefaultStrokeWidth}
+                      stroke-dasharray={svgTokens.placeRelationCircleDasharray}
+                      style={svgTokens.pointerEventsNone}
                     />
                   )}
                 </g>
@@ -1114,37 +1312,9 @@ const App: Component = () => {
           </g>
         </svg>
       </div>
-      <div class="p-2 basis-1/25 grow max-w-100 bg-sky-50 flex flex-col gap-4 overflow-auto">
-        <DrawingGuide
-          step={guideStep}
-          selectedPlaceId={selectedPlaceId()}
-          selectedLineSegmentId={selectedLineSegmentId()}
-          transformChoice={transformChoice()}
-          onStepObserve={resetGuide}
-          onStepSelect={() => setGuideStep('select')}
-          onStepSelectToTransform={() => setGuideStep('transform')}
-          onStepTransformToExecute={handleStepTransformToExecute}
-          onStepExecuteToComplete={handleStepExecuteToComplete}
-          onSelectCanvas={() => {
-            setHasDrawingPaneSelected(true);
-            setSelectedPlaceId(null);
-            setSelectedLineSegmentId(null);
-          }}
-          onTransformChoice={handleTransformChoice}
-          onCommit={handleCommit}
-          onReject={handleReject}
-          onReset={resetGuide}
-          hasDrawingPaneSelected={hasDrawingPaneSelected()}
-          pendingAdd={!!pendingAdd()}
-          pendingMove={!!pendingMove()}
-          pendingRotate={!!pendingRotate()}
-          pendingAddLine={!!pendingAddLine()}
-          pendingDeleteLineId={!!pendingDeleteLineId()}
-          availableTransforms={availableTransformsList()}
-        />
-        <hr class="border-sky-300" />
-        <DrawingObjectsList />
-        <TransformationsList />
+      {/* Right pane: Drawing DNA */}
+      <div class={classes.paneDna}>
+        <DrawingDNAPane />
       </div>
     </div>
   );

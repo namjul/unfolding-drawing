@@ -1,6 +1,9 @@
 import type { Accessor, Component } from 'solid-js';
+import { createEffect, createSignal } from 'solid-js';
 import type { LineSegmentId, PlaceId } from '../lib/evolu-db';
 import type { TransformChoice } from '../lib/transform-matrix';
+import { classes, collapseContentStyle } from '../styles/tokens';
+import ViewControls from './ViewControls';
 
 export type GuideStep =
   | 'observe'
@@ -11,6 +14,8 @@ export type GuideStep =
 
 export type { TransformChoice };
 
+type Mode = 'default' | 'pan';
+
 interface DrawingGuideProps {
   step: Accessor<GuideStep>;
   selectedPlaceId: PlaceId | null;
@@ -18,9 +23,8 @@ interface DrawingGuideProps {
   transformChoice: TransformChoice;
   onStepObserve: () => void;
   onStepSelect: () => void;
-  onStepSelectToTransform?: () => void;
-  onStepTransformToExecute?: () => void;
-  onStepExecuteToComplete?: () => void;
+  onRequestStep?: (step: GuideStep) => void;
+  onCancelSelection?: () => void;
   onSelectCanvas: () => void;
   onTransformChoice: (choice: TransformChoice) => void;
   onCommit: () => void;
@@ -36,339 +40,350 @@ interface DrawingGuideProps {
     id: NonNullable<TransformChoice>;
     label: string;
   }[];
+  // ViewControls props for Observation container
+  scale: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onResetZoom: () => void;
+  canZoomIn: boolean;
+  canZoomOut: boolean;
+  mode: Mode;
+  onTogglePan: () => void;
+  onResetDrawing: () => void;
 }
-
-const PHASES = [
-  { id: 'observe' as const, label: '1. Observe' },
-  { id: 'select' as const, label: '2. Select' },
-  { id: 'transform' as const, label: '3. Transform' },
-  { id: 'execute' as const, label: '4. Execute / Complete' },
-] as const;
 
 const DrawingGuide: Component<DrawingGuideProps> = (props) => {
   const step = (): GuideStep => props.step();
 
-  const stepToPhase = () => {
+  const [selectionExpanded, setSelectionExpanded] = createSignal(true);
+  const [transformationExpanded, setTransformationExpanded] =
+    createSignal(true);
+  const [detailsExpanded, setDetailsExpanded] = createSignal(true);
+
+  // Sync expand/collapse to step when step() changes
+  createEffect(() => {
     const s = step();
-    if (s === 'observe') return 'observe';
-    if (s === 'select') return 'select';
-    if (s === 'transform') return 'transform';
-    if (s === 'execute' || s === 'complete') return 'execute';
-    return 'observe';
+    if (s === 'observe' || s === 'select') {
+      setSelectionExpanded(true);
+      setTransformationExpanded(false);
+      setDetailsExpanded(false);
+    } else if (s === 'transform') {
+      setSelectionExpanded(false);
+      setTransformationExpanded(true);
+      setDetailsExpanded(false);
+    } else if (s === 'execute' || s === 'complete') {
+      setSelectionExpanded(false);
+      setTransformationExpanded(false);
+      setDetailsExpanded(true);
+    }
+  });
+
+  const currentStepPane = (): 'selection' | 'transformation' | 'details' => {
+    const s = step();
+    if (s === 'observe' || s === 'select') return 'selection';
+    if (s === 'transform') return 'transformation';
+    return 'details';
   };
 
-  const currentPhase = stepToPhase;
+  const selectionSubtitle = () => {
+    if (props.hasDrawingPaneSelected) return 'Canvas (Drawing Pane)';
+    if (props.selectedPlaceId) return 'Place';
+    if (props.selectedLineSegmentId) return 'Line segment';
+    return 'Select the object you want to change?';
+  };
 
-  const collapsedSummary = (phaseId: (typeof PHASES)[number]['id']) => {
-    if (phaseId === 'observe')
-      return currentPhase() !== 'observe' ? 'Continued' : null;
-    if (phaseId === 'select') {
-      if (props.hasDrawingPaneSelected) return 'Canvas (Drawing Pane)';
-      if (props.selectedPlaceId) return 'Place';
-      if (props.selectedLineSegmentId) return 'Line segment';
-      return null;
-    }
-    if (phaseId === 'transform') {
-      if (props.transformChoice === 'add') return 'Add Place';
-      if (props.transformChoice === 'addRelated') return 'Add a Related Place';
-      if (props.transformChoice === 'addLine') return 'Add Line';
-      if (props.transformChoice === 'move') return 'Move Place';
-      if (props.transformChoice === 'delete') return 'Delete Place';
-      if (props.transformChoice === 'deleteLine') return 'Delete Line';
-      if (props.transformChoice === 'rotate') return 'Rotate Place';
-      return null;
-    }
-    if (phaseId === 'execute') {
-      if (step() === 'complete') return 'Commit / Reject';
-      if (step() === 'execute') {
-        if (props.transformChoice === 'add') return 'Click to add';
-        if (props.transformChoice === 'addRelated')
-          return 'Click to add related';
-        if (props.transformChoice === 'addLine') return 'Place other end';
-        if (props.transformChoice === 'move') return 'Drag to move';
-        if (props.transformChoice === 'delete') return 'Confirm delete';
-        if (props.transformChoice === 'deleteLine') return 'Confirm delete';
-        if (props.transformChoice === 'rotate') return 'Drag axis to rotate';
-      }
-      return null;
-    }
-    return null;
+  const transformationSubtitle = () => {
+    if (props.transformChoice === 'add') return 'Add Place';
+    if (props.transformChoice === 'addRelated') return 'Add a Related Place';
+    if (props.transformChoice === 'addLine') return 'Add Line';
+    if (props.transformChoice === 'move') return 'Move Place';
+    if (props.transformChoice === 'delete') return 'Delete Place';
+    if (props.transformChoice === 'deleteLine') return 'Delete Line';
+    if (props.transformChoice === 'rotate') return 'Rotate Place';
+    return 'Select the change you want to make.';
+  };
+
+  const hasChanges = () => {
+    const s = step();
+    if (s === 'complete') return true;
+    if (s !== 'execute') return false;
+    return !!(
+      props.pendingAdd ||
+      props.pendingMove ||
+      props.pendingRotate ||
+      props.pendingDeleteLineId ||
+      props.transformChoice === 'delete' ||
+      props.transformChoice === 'deleteLine' ||
+      (props.transformChoice === 'addLine' && !props.pendingAddLine)
+    );
   };
 
   return (
-    <div class="flex flex-col gap-1">
-      <h3 class="font-medium text-slate-700 mb-2">Drawing Guide</h3>
+    <div class={classes.guideRoot}>
+      <h3 class={classes.guideTitle}>Drawing Guide</h3>
 
-      {PHASES.map((p) => {
-        const cp = currentPhase();
-        const isExpanded = cp === p.id;
-        const summary = collapsedSummary(p.id);
-        const isPast =
-          (p.id === 'observe' && cp !== 'observe') ||
-          (p.id === 'select' && ['transform', 'execute'].includes(cp)) ||
-          (p.id === 'transform' && cp === 'execute');
+      {/* Container 1 – Observation: always visible, no collapse */}
+      <div class={classes.observationContainer}>
+        <div class={classes.observationHeader}>Observation</div>
+        <div class={classes.observationBody}>
+          <ViewControls
+            scale={props.scale}
+            onZoomIn={props.onZoomIn}
+            onZoomOut={props.onZoomOut}
+            onResetZoom={props.onResetZoom}
+            canZoomIn={props.canZoomIn}
+            canZoomOut={props.canZoomOut}
+            mode={props.mode}
+            onTogglePan={props.onTogglePan}
+            onResetDrawing={props.onResetDrawing}
+          />
+          <p class={`${classes.guideText} mt-2`}>
+            Look at the drawing. What would you like to do?
+          </p>
+        </div>
+      </div>
 
-        return (
-          <div
-            class="border border-sky-200 rounded overflow-hidden"
-            classList={{ 'bg-sky-50/50': isPast }}
-          >
-            <div
-              class={`px-2 py-1.5 flex justify-between items-center text-sm ${
-                isExpanded ? 'bg-sky-200 font-medium' : 'bg-sky-50'
-              } ${isPast ? 'text-slate-500' : 'text-slate-700'}`}
-            >
-              <span>{p.label}</span>
-              {!isExpanded && summary && (
-                <span class="text-xs text-slate-500 ml-2">— {summary}</span>
+      {/* Container 2 – Selection */}
+      <div
+        class={classes.guideContainer}
+        classList={{
+          [classes.guideContainerCurrent]: currentStepPane() === 'selection',
+          [classes.guideContainerInactive]: currentStepPane() !== 'selection',
+        }}
+      >
+        <button
+          type="button"
+          class={classes.guideHeaderButton}
+          classList={{
+            [classes.guideHeaderCurrent]: currentStepPane() === 'selection',
+            [classes.guideHeaderInactive]: currentStepPane() !== 'selection',
+          }}
+          onClick={() => {
+            const next = !selectionExpanded();
+            setSelectionExpanded(next);
+            if (next) {
+              setTransformationExpanded(false);
+              setDetailsExpanded(false);
+              props.onRequestStep?.('select');
+            }
+          }}
+        >
+          <span class="font-medium">Selection</span>
+          <span class={classes.guideHeaderSubtitle}>{selectionSubtitle()}</span>
+          <span class="shrink-0 ml-1">{selectionExpanded() ? '▼' : '▶'}</span>
+        </button>
+        <div
+          class={classes.guideCollapseTransition}
+          style={collapseContentStyle(selectionExpanded())}
+        >
+          <div class={classes.guideBody}>
+            <div class={classes.guideBodyBorder}>
+              <p class={classes.guideText}>
+                Select a drawing object on the canvas or
+              </p>
+              <button
+                type="button"
+                class={
+                  props.hasDrawingPaneSelected
+                    ? classes.buttonSelectCanvasSelected
+                    : classes.buttonSelectCanvas
+                }
+                onClick={props.onSelectCanvas}
+              >
+                select canvas
+              </button>
+              <p class={classes.guideTextMuted}>
+                — or click a Place or a line segment on the canvas to select it.
+              </p>
+              {(props.hasDrawingPaneSelected ||
+                props.selectedPlaceId ||
+                props.selectedLineSegmentId) && (
+                <button
+                  type="button"
+                  class={classes.buttonCancelSelection}
+                  onClick={() => props.onCancelSelection?.()}
+                >
+                  Cancel selection
+                </button>
               )}
             </div>
-            <div
-              class="grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out items-start"
-              style={{
-                'grid-template-rows': isExpanded ? 'auto' : '0fr',
-              }}
-            >
-              <div class="min-h-0 overflow-hidden">
-                <div class="border-t border-sky-200 px-2 py-2 bg-white">
-                  {p.id === 'observe' && (
-                    <div class="flex flex-col gap-2">
-                      <p class="text-sm text-slate-600">
-                        Look at the drawing. What would you like to do?
-                      </p>
-                      <button
-                        type="button"
-                        class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
-                        onClick={props.onStepSelect}
-                      >
-                        Continue — Select
-                      </button>
-                    </div>
-                  )}
+          </div>
+        </div>
+      </div>
 
-                  {p.id === 'select' && (
-                    <div class="flex flex-col gap-2">
-                      <p class="text-sm text-slate-600">
-                        Choose what to select:
-                      </p>
-                      <div class="flex flex-col gap-2">
-                        <button
-                          type="button"
-                          class={`px-3 py-2 rounded text-sm text-left ${
-                            props.hasDrawingPaneSelected
-                              ? 'bg-sky-400 text-white'
-                              : 'bg-sky-100 hover:bg-sky-200'
-                          }`}
-                          onClick={props.onSelectCanvas}
-                        >
-                          Select Canvas (Drawing Pane)
-                        </button>
-                        <p class="text-xs text-slate-500">— or —</p>
-                        <p class="text-sm text-slate-600">
-                          Click a Place or a line segment on the canvas to
-                          select it.
-                        </p>
-                      </div>
-                      {(props.hasDrawingPaneSelected ||
-                        props.selectedPlaceId ||
-                        props.selectedLineSegmentId) && (
-                        <button
-                          type="button"
-                          class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
-                          onClick={() => props.onStepSelectToTransform?.()}
-                        >
-                          Continue
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        class="px-3 py-1 text-xs text-slate-500 hover:text-slate-700"
-                        onClick={props.onReset}
-                      >
-                        Back
-                      </button>
-                    </div>
-                  )}
-
-                  {p.id === 'transform' && (
-                    <div class="flex flex-col gap-2">
-                      <p class="text-sm text-slate-600">
-                        Choose a transformation:
-                      </p>
-                      <div class="flex flex-col gap-1">
-                        {props.availableTransforms.map((t) => (
-                          <button
-                            type="button"
-                            class={`px-3 py-2 rounded text-sm text-left ${
-                              props.transformChoice === t.id
-                                ? 'bg-sky-400 text-white'
-                                : 'bg-sky-100 hover:bg-sky-200'
-                            }`}
-                            onClick={() => props.onTransformChoice(t.id)}
-                          >
-                            {t.label}
-                          </button>
-                        ))}
-                      </div>
-                      {props.transformChoice && (
-                        <button
-                          type="button"
-                          class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
-                          onClick={() => props.onStepTransformToExecute?.()}
-                        >
-                          Continue
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        class="px-3 py-1 text-xs text-slate-500 hover:text-slate-700"
-                        onClick={props.onReset}
-                      >
-                        Back
-                      </button>
-                    </div>
-                  )}
-
-                  {p.id === 'execute' && step() === 'execute' && (
-                    <div class="flex flex-col gap-2">
-                      {(props.transformChoice === 'add' ||
-                        props.transformChoice === 'addRelated') && (
-                        <>
-                          <p class="text-sm text-slate-600">
-                            {props.transformChoice === 'addRelated'
-                              ? 'Click to add a related Place (child of selected). Drag to reposition. Continue when ready.'
-                              : 'Click anywhere on the canvas to add a Place. Drag to reposition. Continue when ready.'}
-                          </p>
-                          {props.pendingAdd ? (
-                            <button
-                              type="button"
-                              class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
-                              onClick={() => props.onStepExecuteToComplete?.()}
-                            >
-                              Continue
-                            </button>
-                          ) : null}
-                        </>
-                      )}
-                      {props.transformChoice === 'move' && (
-                        <>
-                          <p class="text-sm text-slate-600">
-                            Drag the selected Place to move it. Continue when
-                            ready.
-                          </p>
-                          {props.pendingMove ? (
-                            <button
-                              type="button"
-                              class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
-                              onClick={() => props.onStepExecuteToComplete?.()}
-                            >
-                              Continue
-                            </button>
-                          ) : null}
-                        </>
-                      )}
-                      {props.transformChoice === 'delete' && (
-                        <>
-                          <p class="text-sm text-slate-600">
-                            This place will be deleted. Continue to confirm.
-                          </p>
-                          <button
-                            type="button"
-                            class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
-                            onClick={() => props.onStepExecuteToComplete?.()}
-                          >
-                            Continue
-                          </button>
-                        </>
-                      )}
-                      {props.transformChoice === 'addLine' && (
-                        <>
-                          <p class="text-sm text-slate-600">
-                            Click on a place or the canvas to place the other
-                            end. If you placed a new place, drag it to
-                            reposition. Continue when ready.
-                          </p>
-                          {!props.pendingAddLine ? (
-                            <button
-                              type="button"
-                              class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
-                              onClick={() => props.onStepExecuteToComplete?.()}
-                            >
-                              Continue
-                            </button>
-                          ) : null}
-                        </>
-                      )}
-                      {props.transformChoice === 'deleteLine' && (
-                        <>
-                          <p class="text-sm text-slate-600">
-                            This line will be deleted. Continue to confirm.
-                          </p>
-                          <button
-                            type="button"
-                            class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
-                            onClick={() => props.onStepExecuteToComplete?.()}
-                          >
-                            Continue
-                          </button>
-                        </>
-                      )}
-                      {props.transformChoice === 'rotate' && (
-                        <>
-                          <p class="text-sm text-slate-600">
-                            Drag the orientation axis to rotate. Related places
-                            will rotate around this place. Continue when ready.
-                          </p>
-                          {props.pendingRotate ? (
-                            <button
-                              type="button"
-                              class="px-3 py-2 bg-sky-200 hover:bg-sky-300 rounded text-sm"
-                              onClick={() => props.onStepExecuteToComplete?.()}
-                            >
-                              Continue
-                            </button>
-                          ) : null}
-                        </>
-                      )}
-                      <button
-                        type="button"
-                        class="px-3 py-1 text-xs text-slate-500 hover:text-slate-700"
-                        onClick={props.onReset}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-
-                  {p.id === 'execute' && step() === 'complete' && (
-                    <div class="flex flex-col gap-2">
-                      <p class="text-sm text-slate-600">
-                        Complete the transformation:
-                      </p>
-                      <div class="flex gap-2">
-                        <button
-                          type="button"
-                          class="px-3 py-2 bg-green-200 hover:bg-green-300 rounded text-sm"
-                          onClick={props.onCommit}
-                        >
-                          Commit
-                        </button>
-                        <button
-                          type="button"
-                          class="px-3 py-2 bg-red-100 hover:bg-red-200 rounded text-sm"
-                          onClick={props.onReject}
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+      {/* Container 3 – Transformation */}
+      <div
+        class={classes.guideContainer}
+        classList={{
+          [classes.guideContainerCurrent]:
+            currentStepPane() === 'transformation',
+          [classes.guideContainerInactive]:
+            currentStepPane() !== 'transformation',
+        }}
+      >
+        <button
+          type="button"
+          class={classes.guideHeaderButton}
+          classList={{
+            [classes.guideHeaderCurrent]:
+              currentStepPane() === 'transformation',
+            [classes.guideHeaderInactive]:
+              currentStepPane() !== 'transformation',
+          }}
+          onClick={() => {
+            const next = !transformationExpanded();
+            setTransformationExpanded(next);
+            if (next) {
+              setSelectionExpanded(false);
+              setDetailsExpanded(false);
+              props.onRequestStep?.('transform');
+            }
+          }}
+        >
+          <span class="font-medium">Transformation</span>
+          <span class={classes.guideHeaderSubtitle}>
+            {transformationSubtitle()}
+          </span>
+          <span class="shrink-0 ml-1">
+            {transformationExpanded() ? '▼' : '▶'}
+          </span>
+        </button>
+        <div
+          class={classes.guideCollapseTransition}
+          style={collapseContentStyle(transformationExpanded())}
+        >
+          <div class={classes.guideBody}>
+            <div class={classes.guideBodyBorder}>
+              <p class={classes.guideText}>Choose a transformation:</p>
+              <div class="flex flex-col gap-1 mt-2">
+                {props.availableTransforms.map((t) => (
+                  <button
+                    type="button"
+                    class={
+                      props.transformChoice === t.id
+                        ? classes.buttonTransformationSelected
+                        : classes.buttonTransformation
+                    }
+                    onClick={() => props.onTransformChoice(t.id)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
-        );
-      })}
+        </div>
+      </div>
+
+      {/* Container 4 – Transformation Details */}
+      <div
+        class={classes.guideContainer}
+        classList={{
+          [classes.guideContainerCurrent]: currentStepPane() === 'details',
+          [classes.guideContainerInactive]: currentStepPane() !== 'details',
+        }}
+      >
+        <button
+          type="button"
+          class={classes.guideHeaderButton}
+          classList={{
+            [classes.guideHeaderCurrent]: currentStepPane() === 'details',
+            [classes.guideHeaderInactive]: currentStepPane() !== 'details',
+          }}
+          onClick={() => {
+            const next = !detailsExpanded();
+            setDetailsExpanded(next);
+            if (next) {
+              setSelectionExpanded(false);
+              setTransformationExpanded(false);
+              props.onRequestStep?.('execute');
+            }
+          }}
+        >
+          <span class="font-medium">Transformation Details</span>
+          <span class="shrink-0 ml-1">{detailsExpanded() ? '▼' : '▶'}</span>
+        </button>
+        <div
+          class={classes.guideCollapseTransition}
+          style={collapseContentStyle(detailsExpanded())}
+        >
+          <div class={classes.guideBody}>
+            <div class={classes.guideBodyBorder}>
+              {step() === 'execute' && (
+                <>
+                  {(props.transformChoice === 'add' ||
+                    props.transformChoice === 'addRelated') && (
+                    <p class={classes.guideText}>
+                      {props.transformChoice === 'addRelated'
+                        ? 'Click to add a related Place (child of selected). Drag to reposition.'
+                        : 'Click anywhere on the canvas to add a Place. Drag to reposition.'}
+                    </p>
+                  )}
+                  {props.transformChoice === 'move' && (
+                    <p class={classes.guideText}>
+                      Drag the selected Place to move it.
+                    </p>
+                  )}
+                  {props.transformChoice === 'delete' && (
+                    <p class={classes.guideText}>This place will be deleted.</p>
+                  )}
+                  {props.transformChoice === 'addLine' && (
+                    <p class={classes.guideText}>
+                      Click on a place or the canvas to place the other end. If
+                      you placed a new place, drag it to reposition.
+                    </p>
+                  )}
+                  {props.transformChoice === 'deleteLine' && (
+                    <p class={classes.guideText}>This line will be deleted.</p>
+                  )}
+                  {props.transformChoice === 'rotate' && (
+                    <p class={classes.guideText}>
+                      Drag the orientation axis to rotate. Related places will
+                      rotate around this place.
+                    </p>
+                  )}
+                </>
+              )}
+
+              {(step() === 'execute' || step() === 'complete') && (
+                <div class={classes.guideDetailsActions}>
+                  <div class={classes.guideDetailsActionsRow}>
+                    <button
+                      type="button"
+                      class={classes.buttonKeep}
+                      disabled={!hasChanges()}
+                      onClick={props.onCommit}
+                    >
+                      keep the changes
+                    </button>
+                    <button
+                      type="button"
+                      class={classes.buttonDiscard}
+                      disabled={!hasChanges()}
+                      onClick={props.onReject}
+                    >
+                      discard the changes
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    class={classes.buttonBackReset}
+                    onClick={props.onReset}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+
+              {step() !== 'execute' && step() !== 'complete' && (
+                <p class="text-sm text-slate-500">
+                  Select a transformation above, then follow the guidance here.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

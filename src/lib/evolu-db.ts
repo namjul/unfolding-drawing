@@ -7,6 +7,7 @@ import {
   literal,
   nullOr,
   SimpleName,
+  String1000,
   union,
 } from '@evolu/common';
 import { evoluWebDeps } from '@evolu/web';
@@ -38,15 +39,18 @@ export const Schema = {
     x: FiniteNumber,
     y: FiniteNumber,
     angle: nullOr(FiniteNumber),
+    name: nullOr(String1000),
   },
   lineSegmentEnd: {
     id: LineSegmentEndId,
     placeId: PlaceId,
+    name: nullOr(String1000),
   },
   lineSegment: {
     id: LineSegmentId,
     endAId: LineSegmentEndId,
     endBId: LineSegmentEndId,
+    name: nullOr(String1000),
   },
   transformation: {
     id: TransformationId,
