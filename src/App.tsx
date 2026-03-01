@@ -13,22 +13,34 @@ import DrawingDNAPane from './components/DrawingDNAPane';
 import type { GuideStep, TransformChoice } from './components/DrawingGuide';
 import DrawingGuide from './components/DrawingGuide';
 import {
+  type BendCircle,
+  buildBentSegmentPath,
+  distanceFromPointToBentPath,
+} from './lib/bentSegmentPath';
+import {
   getRelatedPlaceIds,
   getRelationshipSegments,
 } from './lib/drawingRelations';
 import {
+  allBendingCircularFieldsQuery,
+  allCircularFieldsQuery,
   allLineSegmentEndsQuery,
   allLineSegmentsQuery,
   allPlacesQuery,
   allTransformationsQuery,
+  type BendingCircularFieldId,
+  type CircularFieldId,
   type LineSegmentEndId,
   type LineSegmentId,
   type PlaceId,
   useEvolu,
 } from './lib/evolu-db';
 import { lineSegmentEndDisplayName } from './lib/lineSegmentEndName';
-import type { LineSegmentWithPositions } from './lib/lineSegmentHit';
-import { findLineSegmentAt } from './lib/lineSegmentHit';
+import {
+  distanceFromPointToSegment,
+  type LineSegmentWithPositions,
+} from './lib/lineSegmentHit';
+import { recordTransformation } from './lib/recordTransformation';
 import {
   availableTransforms as getAvailableTransforms,
   getSelectionType,
@@ -37,6 +49,12 @@ import { useQuery } from './lib/useQuery';
 import { classes, svg as svgTokens } from './styles/tokens';
 
 const LINE_SEGMENT_HIT_THRESHOLD = 12;
+const CIRCULAR_FIELD_DEFAULT_RADIUS = 50;
+const CIRCULAR_FIELD_MIN_RADIUS = 5;
+const CIRCULAR_FIELD_RADIUS_HANDLE_THRESHOLD = 12;
+const CIRCULAR_FIELD_HIT_THRESHOLD = 12;
+const BENDING_FIELD_HIT_THRESHOLD = 12;
+const BENDING_FIELD_RADIUS_HANDLE_THRESHOLD = 12;
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
@@ -55,6 +73,8 @@ const App: Component = () => {
   const transformationsRows = useQuery(allTransformationsQuery);
   const lineSegmentEndsRows = useQuery(allLineSegmentEndsQuery);
   const lineSegmentsRows = useQuery(allLineSegmentsQuery);
+  const circularFieldsRows = useQuery(allCircularFieldsQuery);
+  const bendingCircularFieldsRows = useQuery(allBendingCircularFieldsQuery);
   let svg!: SVGSVGElement;
 
   const [scale, setScale] = createSignal(1);
@@ -71,18 +91,128 @@ const App: Component = () => {
   );
   const [selectedLineSegmentId, setSelectedLineSegmentId] =
     createSignal<LineSegmentId | null>(null);
+  const [selectedCircularFieldId, setSelectedCircularFieldId] =
+    createSignal<CircularFieldId | null>(null);
+  const [selectedBendingCircularFieldId, setSelectedBendingCircularFieldId] =
+    createSignal<BendingCircularFieldId | null>(null);
   const [transformChoice, setTransformChoice] =
     createSignal<TransformChoice>(null);
   const [hasDrawingPaneSelected, setHasDrawingPaneSelected] =
     createSignal(false);
+
+  /** True if this circular field's parent place has no other children (so moving is allowed). */
+  const isCircularFieldOnlyChild = (cfId: CircularFieldId | null): boolean => {
+    if (!cfId) return false;
+    const cf = circularFields().find((c) => c.id === cfId);
+    const placeId = cf?.placeId;
+    if (!placeId) return false;
+    const childPlaces = places().filter((p) => p.parentId === placeId).length;
+    const endsAtPlace = lineSegmentEnds().filter(
+      (e) => e.placeId === placeId,
+    ).length;
+    const fieldsAtPlace = circularFields().filter(
+      (c) => c.placeId === placeId,
+    ).length;
+    return childPlaces === 0 && endsAtPlace === 0 && fieldsAtPlace === 1;
+  };
 
   const availableTransformsList = createMemo(() => {
     const selectionType = getSelectionType(
       hasDrawingPaneSelected(),
       selectedPlaceId(),
       selectedLineSegmentId(),
+      selectedCircularFieldId(),
+      selectedBendingCircularFieldId(),
     );
-    return getAvailableTransforms(selectionType);
+    const list = getAvailableTransforms(selectionType);
+    if (selectionType !== 'circularField') return list;
+    const cfId = selectedCircularFieldId();
+    return list.filter(
+      (t) => t.id !== 'moveCircularField' || isCircularFieldOnlyChild(cfId),
+    );
+  });
+
+  const [bendAtEndsDirty, setBendAtEndsDirty] = createSignal(false);
+
+  const bendAtEndsState = createMemo(() => {
+    const segId = selectedLineSegmentId();
+    const tc = transformChoice();
+    if (tc !== 'bendAtEnds' || !segId) return null;
+    const seg = lineSegments().find((s) => s.id === segId);
+    if (!seg) return null;
+    const endAId = seg.endAId;
+    const endBId = seg.endBId;
+    if (endAId == null || endBId == null) return null;
+    const ends = lineSegmentEnds();
+    const pl = places();
+    const segsWithPos = lineSegmentsWithPositions();
+    const pos = segsWithPos.find((s) => s.id === segId);
+    if (!pos) return null;
+    const endA = ends.find((e) => e.id === endAId);
+    const endB = ends.find((e) => e.id === endBId);
+    if (!endA || !endB) return null;
+    const placeAName =
+      pl.find((p) => p.id === endA.placeId)?.name?.trim() ?? 'Place';
+    const placeBName =
+      pl.find((p) => p.id === endB.placeId)?.name?.trim() ?? 'Place';
+    const segmentName = seg.name?.trim() ?? 'Line segment';
+    const endALabel = lineSegmentEndDisplayName(segmentName, placeAName);
+    const endBLabel = lineSegmentEndDisplayName(segmentName, placeBName);
+    const bending = bendingCircularFields();
+    const bendAtA = bending.find((b) => b.lineSegmentEndId === endAId);
+    const bendAtB = bending.find((b) => b.lineSegmentEndId === endBId);
+    const L = Math.hypot(pos.x2 - pos.x1, pos.y2 - pos.y1) || 1;
+    const radius = Math.max(CIRCULAR_FIELD_MIN_RADIUS, 0.25 * L);
+    const dx = pos.x2 - pos.x1;
+    const dy = pos.y2 - pos.y1;
+    const offsetForEndA = () => ({
+      offsetX: radius * (-dy / L),
+      offsetY: radius * (dx / L),
+    });
+    const offsetForEndB = () => ({
+      offsetX: radius * (dy / L),
+      offsetY: radius * (-dx / L),
+    });
+    return {
+      endALabel,
+      endBLabel,
+      hasBendAtA: !!bendAtA,
+      hasBendAtB: !!bendAtB,
+      onToggleBendAtA: () => {
+        if (bendAtA) {
+          evolu.update('bendingCircularField', {
+            id: bendAtA.id,
+            isDeleted: true,
+          });
+        } else {
+          const { offsetX, offsetY } = offsetForEndA();
+          evolu.insert('bendingCircularField', {
+            lineSegmentEndId: endAId,
+            radius,
+            offsetX,
+            offsetY,
+          });
+        }
+        setBendAtEndsDirty(true);
+      },
+      onToggleBendAtB: () => {
+        if (bendAtB) {
+          evolu.update('bendingCircularField', {
+            id: bendAtB.id,
+            isDeleted: true,
+          });
+        } else {
+          const { offsetX, offsetY } = offsetForEndB();
+          evolu.insert('bendingCircularField', {
+            lineSegmentEndId: endBId,
+            radius,
+            offsetX,
+            offsetY,
+          });
+        }
+        setBendAtEndsDirty(true);
+      },
+    };
   });
 
   const [pendingAdd, setPendingAdd] = createSignal<{
@@ -109,13 +239,49 @@ const App: Component = () => {
   } | null>(null);
   const [pendingDeleteLineId, setPendingDeleteLineId] =
     createSignal<LineSegmentId | null>(null);
+  type PendingAddCircularField =
+    | { stage: 'placing' }
+    | {
+        stage: 'editing';
+        placeId: PlaceId;
+        circularFieldId: CircularFieldId;
+        radius: number;
+        isNewPlace: boolean;
+      };
+  const [pendingAddCircularField, setPendingAddCircularField] =
+    createSignal<PendingAddCircularField | null>(null);
+  const [pendingModifyCircularField, setPendingModifyCircularField] =
+    createSignal<{
+      circularFieldId: CircularFieldId;
+      placeId: PlaceId;
+      radius: number;
+    } | null>(null);
+  const [pendingDeleteCircularFieldId, setPendingDeleteCircularFieldId] =
+    createSignal<CircularFieldId | null>(null);
+  const [draggingCircularFieldRadius, setDraggingCircularFieldRadius] =
+    createSignal<CircularFieldId | null>(null);
+  const [pendingMoveBendingCircularField, setPendingMoveBendingCircularField] =
+    createSignal<BendingCircularFieldId | null>(null);
+  const [
+    draggingBendingCircularFieldRadius,
+    setDraggingBendingCircularFieldRadius,
+  ] = createSignal<BendingCircularFieldId | null>(null);
+  const [
+    pendingDeleteBendingCircularFieldId,
+    setPendingDeleteBendingCircularFieldId,
+  ] = createSignal<BendingCircularFieldId | null>(null);
 
   const places = () => placesRows();
   const lineSegmentEnds = () => lineSegmentEndsRows();
   const lineSegments = () => lineSegmentsRows();
+  const circularFields = () => circularFieldsRows();
+  const bendingCircularFields = () => bendingCircularFieldsRows();
 
   createEffect(() => {
-    const isEmpty = places().length === 0 && lineSegments().length === 0;
+    const isEmpty =
+      places().length === 0 &&
+      lineSegments().length === 0 &&
+      circularFields().length === 0;
     if (isEmpty && guideStep() === 'observe') {
       batch(() => {
         setHasDrawingPaneSelected(true);
@@ -283,14 +449,16 @@ const App: Component = () => {
     const ends = lineSegmentEnds();
     const segs = lineSegments();
     const pm = pendingMove();
+    const pr = pendingRotate();
     const moveOverride =
       pm && pm.placeId !== 'pending'
         ? { placeId: pm.placeId, x: pm.x, y: pm.y }
         : null;
+    const angleOverride = pr ? { placeId: pr.placeId, angle: pr.angle } : null;
     const getPlaceAbs = (placeId: PlaceId) => {
       const place = pl.find((p) => p.id === placeId);
       if (!place) return null;
-      const abs = getAbsolutePosition(place, pl, moveOverride, null);
+      const abs = getAbsolutePosition(place, pl, moveOverride, angleOverride);
       return { x: abs.x, y: abs.y };
     };
     return segs
@@ -308,18 +476,161 @@ const App: Component = () => {
           y1: posA.y,
           x2: posB.x,
           y2: posB.y,
+          isScaffolding:
+            seg.isScaffolding != null ? Number(seg.isScaffolding) : null,
         };
       })
       .filter((s): s is LineSegmentWithPositions => s != null);
   };
 
-  const findLineSegmentAtCursor = (cx: number, cy: number) =>
-    findLineSegmentAt(
-      cx,
-      cy,
-      lineSegmentsWithPositions(),
-      LINE_SEGMENT_HIT_THRESHOLD,
-    );
+  const findLineSegmentAtCursor = (
+    cx: number,
+    cy: number,
+  ): LineSegmentId | null => {
+    const segs = lineSegmentsWithPositions();
+    const fullSegs = lineSegments();
+    const bending = bendingFieldsWithPositions();
+    let bestId: LineSegmentId | null = null;
+    let bestD = LINE_SEGMENT_HIT_THRESHOLD;
+    for (const seg of segs) {
+      const full = fullSegs.find((s) => s.id === seg.id);
+      const bendA: BendCircle | undefined = full
+        ? bending.find((b) => b.lineSegmentEndId === full.endAId)
+        : undefined;
+      const bendB: BendCircle | undefined = full
+        ? bending.find((b) => b.lineSegmentEndId === full.endBId)
+        : undefined;
+      const d = distanceFromPointToBentPath(
+        cx,
+        cy,
+        { x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2 },
+        bendA,
+        bendB,
+      );
+      if (d < bestD) {
+        bestD = d;
+        bestId = seg.id;
+      }
+    }
+    return bestId;
+  };
+
+  const circularFieldsWithPositions = (): Array<{
+    id: CircularFieldId;
+    placeId: PlaceId;
+    centerX: number;
+    centerY: number;
+    radius: number;
+  }> => {
+    const fields = circularFields();
+    const positions = placesWithAbsolutePositions();
+    return fields
+      .map((f) => {
+        if (f.placeId == null) return null;
+        const place = positions.find((p) => p.id === f.placeId);
+        if (!place) return null;
+        return {
+          id: f.id,
+          placeId: f.placeId,
+          centerX: place.absX,
+          centerY: place.absY,
+          radius: Number(f.radius),
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x != null);
+  };
+
+  const bendingFieldsWithPositions = (): Array<{
+    id: BendingCircularFieldId;
+    lineSegmentEndId: LineSegmentEndId;
+    centerX: number;
+    centerY: number;
+    radius: number;
+    endX: number;
+    endY: number;
+  }> => {
+    const fields = bendingCircularFields();
+    const ends = lineSegmentEnds();
+    const positions = placesWithAbsolutePositions();
+    return fields
+      .map((f) => {
+        if (f.lineSegmentEndId == null) return null;
+        const end = ends.find((e) => e.id === f.lineSegmentEndId);
+        if (!end?.placeId) return null;
+        const place = positions.find((p) => p.id === end.placeId);
+        if (!place) return null;
+        const endX = place.absX;
+        const endY = place.absY;
+        const centerX = endX + Number(f.offsetX);
+        const centerY = endY + Number(f.offsetY);
+        return {
+          id: f.id,
+          lineSegmentEndId: f.lineSegmentEndId,
+          centerX,
+          centerY,
+          radius: Number(f.radius),
+          endX,
+          endY,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x != null);
+  };
+
+  const isPointNearRadiusHandle = (
+    px: number,
+    py: number,
+    centerX: number,
+    centerY: number,
+    radius: number,
+    threshold = CIRCULAR_FIELD_RADIUS_HANDLE_THRESHOLD,
+  ) => Math.hypot(px - (centerX + radius), py - centerY) <= threshold;
+
+  const findCircularFieldAt = (
+    cx: number,
+    cy: number,
+  ): CircularFieldId | null => {
+    const threshold = CIRCULAR_FIELD_HIT_THRESHOLD;
+    for (const cf of circularFieldsWithPositions()) {
+      const dist = Math.hypot(cx - cf.centerX, cy - cf.centerY);
+      if (dist <= cf.radius + threshold) return cf.id;
+    }
+    return null;
+  };
+
+  const findBendingCircularFieldAt = (
+    cx: number,
+    cy: number,
+  ): BendingCircularFieldId | null => {
+    const threshold = BENDING_FIELD_HIT_THRESHOLD;
+    for (const bf of bendingFieldsWithPositions()) {
+      const distToCenter = Math.hypot(cx - bf.centerX, cy - bf.centerY);
+      if (distToCenter <= bf.radius + threshold) return bf.id;
+      const distToRadiusLine = distanceFromPointToSegment(
+        cx,
+        cy,
+        bf.centerX,
+        bf.centerY,
+        bf.endX,
+        bf.endY,
+      );
+      if (distToRadiusLine <= threshold) return bf.id;
+    }
+    return null;
+  };
+
+  const isPointNearBendingRadiusHandle = (
+    px: number,
+    py: number,
+    centerX: number,
+    centerY: number,
+    endX: number,
+    endY: number,
+    threshold = BENDING_FIELD_RADIUS_HANDLE_THRESHOLD,
+  ) => {
+    const handleX = 2 * centerX - endX;
+    const handleY = 2 * centerY - endY;
+    return Math.hypot(px - handleX, py - handleY) <= threshold;
+  };
 
   const ORIENTATION_AXIS_LENGTH = 120;
   const isPointNearAxis = (
@@ -359,17 +670,41 @@ const App: Component = () => {
       if (hit) {
         setSelectedPlaceId(hit.id);
         setSelectedLineSegmentId(null);
+        setSelectedCircularFieldId(null);
+        setSelectedBendingCircularFieldId(null);
         setHasDrawingPaneSelected(false);
       } else {
         const lineHit = findLineSegmentAtCursor(cx, cy);
         if (lineHit) {
           setSelectedLineSegmentId(lineHit);
           setSelectedPlaceId(null);
+          setSelectedCircularFieldId(null);
+          setSelectedBendingCircularFieldId(null);
           setHasDrawingPaneSelected(false);
         } else {
-          setSelectedPlaceId(null);
-          setSelectedLineSegmentId(null);
-          setHasDrawingPaneSelected(true);
+          const cfHit = findCircularFieldAt(cx, cy);
+          if (cfHit) {
+            setSelectedCircularFieldId(cfHit);
+            setSelectedPlaceId(null);
+            setSelectedLineSegmentId(null);
+            setSelectedBendingCircularFieldId(null);
+            setHasDrawingPaneSelected(false);
+          } else {
+            const bfHit = findBendingCircularFieldAt(cx, cy);
+            if (bfHit) {
+              setSelectedBendingCircularFieldId(bfHit);
+              setSelectedPlaceId(null);
+              setSelectedLineSegmentId(null);
+              setSelectedCircularFieldId(null);
+              setHasDrawingPaneSelected(false);
+            } else {
+              setSelectedPlaceId(null);
+              setSelectedLineSegmentId(null);
+              setSelectedCircularFieldId(null);
+              setSelectedBendingCircularFieldId(null);
+              setHasDrawingPaneSelected(true);
+            }
+          }
         }
       }
       if (gs === 'select') {
@@ -390,6 +725,80 @@ const App: Component = () => {
       return;
     }
 
+    const pac = pendingAddCircularField();
+    if (
+      gs === 'execute' &&
+      tc === 'addCircularField' &&
+      pac?.stage === 'placing'
+    ) {
+      const defaultName = nextPlaceName(places());
+      const nameResult = String1000.from(defaultName);
+      const placeRes = evolu.insert('place', {
+        parentId: null,
+        x: cx,
+        y: cy,
+        ...(nameResult.ok && { name: nameResult.value }),
+        isScaffolding: 1,
+      });
+      if (placeRes.ok) {
+        const cfRes = evolu.insert('circularField', {
+          placeId: placeRes.value.id,
+          radius: CIRCULAR_FIELD_DEFAULT_RADIUS,
+        });
+        if (cfRes.ok) {
+          setPendingAddCircularField({
+            stage: 'editing',
+            placeId: placeRes.value.id,
+            circularFieldId: cfRes.value.id,
+            radius: CIRCULAR_FIELD_DEFAULT_RADIUS,
+            isNewPlace: true,
+          });
+        }
+      }
+      return;
+    }
+
+    const pmc = pendingModifyCircularField();
+    if (gs === 'execute' && tc === 'modifyCircularField' && pmc) {
+      const cf = circularFieldsWithPositions().find(
+        (c) => c.id === pmc.circularFieldId,
+      );
+      if (
+        cf &&
+        isPointNearRadiusHandle(cx, cy, cf.centerX, cf.centerY, pmc.radius)
+      ) {
+        setDraggingCircularFieldRadius(pmc.circularFieldId);
+        return;
+      }
+    }
+
+    if (
+      gs === 'execute' &&
+      tc === 'addCircularField' &&
+      pac?.stage === 'editing'
+    ) {
+      const place = placesWithAbsolutePositions().find(
+        (p) => p.id === pac.placeId,
+      );
+      const centerX = place?.absX ?? 0;
+      const centerY = place?.absY ?? 0;
+      if (isPointNearRadiusHandle(cx, cy, centerX, centerY, pac.radius)) {
+        setDraggingCircularFieldRadius(pac.circularFieldId);
+        return;
+      }
+      if (
+        pac.isNewPlace &&
+        isPlaceAt(cx, cy, { absX: centerX, absY: centerY })
+      ) {
+        setPendingMove({
+          placeId: pac.placeId,
+          x: centerX,
+          y: centerY,
+        });
+        return;
+      }
+    }
+
     if (gs === 'execute' && tc === 'move' && hit) {
       if (hit.id === selectedPlaceId()) {
         setPendingMove({
@@ -397,6 +806,57 @@ const App: Component = () => {
           x: hit.absX,
           y: hit.absY,
         });
+      }
+    }
+
+    if (gs === 'execute' && tc === 'moveCircularField') {
+      const cfId = selectedCircularFieldId();
+      if (cfId) {
+        const cf = circularFieldsWithPositions().find((c) => c.id === cfId);
+        if (cf) {
+          const dist = Math.hypot(cx - cf.centerX, cy - cf.centerY);
+          if (dist <= cf.radius + CIRCULAR_FIELD_HIT_THRESHOLD) {
+            setPendingMove({
+              placeId: cf.placeId,
+              x: cf.centerX,
+              y: cf.centerY,
+            });
+          }
+        }
+      }
+    }
+
+    if (gs === 'execute' && tc === 'moveBendingCircularField') {
+      const bfId = selectedBendingCircularFieldId();
+      if (bfId) {
+        const bf = bendingFieldsWithPositions().find((b) => b.id === bfId);
+        if (bf) {
+          const dist = Math.hypot(cx - bf.centerX, cy - bf.centerY);
+          if (dist <= bf.radius + BENDING_FIELD_HIT_THRESHOLD) {
+            setPendingMoveBendingCircularField(bfId);
+          }
+        }
+      }
+    }
+
+    if (gs === 'execute' && tc === 'modifyBendingCircularField') {
+      const bfId = selectedBendingCircularFieldId();
+      if (bfId) {
+        const bf = bendingFieldsWithPositions().find((b) => b.id === bfId);
+        if (
+          bf &&
+          isPointNearBendingRadiusHandle(
+            cx,
+            cy,
+            bf.centerX,
+            bf.centerY,
+            bf.endX,
+            bf.endY,
+          )
+        ) {
+          setDraggingBendingCircularFieldRadius(bfId);
+          return;
+        }
       }
     }
 
@@ -432,11 +892,19 @@ const App: Component = () => {
             places()
               .find((p) => p.id === hit.id)
               ?.name?.trim() || 'Place';
-          evolu.insert('lineSegment', {
+          const segRes = evolu.insert('lineSegment', {
             endAId: pal.startEndId,
             endBId: endBRes.value.id,
             ...(nameResult.ok && { name: nameResult.value }),
+            isScaffolding: 0,
           });
+          if (segRes.ok) {
+            recordTransformation({
+              kind: 'addLine',
+              placeId: pal.startPlaceId,
+              lineSegmentId: segRes.value.id,
+            });
+          }
           const endAName = String1000.from(
             lineSegmentEndDisplayName(lineName, placeNameA),
           );
@@ -481,6 +949,7 @@ const App: Component = () => {
           x,
           y,
           ...(nameResult.ok && { name: nameResult.value }),
+          isScaffolding: 1,
         });
         if (placeRes.ok) {
           const endBRes = evolu.insert('lineSegmentEnd', {
@@ -493,11 +962,19 @@ const App: Component = () => {
               places()
                 .find((p) => p.id === pal.startPlaceId)
                 ?.name?.trim() || 'Place';
-            evolu.insert('lineSegment', {
+            const segRes = evolu.insert('lineSegment', {
               endAId: pal.startEndId,
               endBId: endBRes.value.id,
               ...(segNameResult.ok && { name: segNameResult.value }),
+              isScaffolding: 0,
             });
+            if (segRes.ok) {
+              recordTransformation({
+                kind: 'addLine',
+                placeId: pal.startPlaceId,
+                lineSegmentId: segRes.value.id,
+              });
+            }
             const endAName = String1000.from(
               lineSegmentEndDisplayName(lineName, placeNameA),
             );
@@ -531,6 +1008,8 @@ const App: Component = () => {
     const pr = pendingRotate();
     const pa = pendingAdd();
     const pal = pendingAddLine();
+    const pac = pendingAddCircularField();
+    const draggingCf = draggingCircularFieldRadius();
     const { x: cx, y: cy } = screenToCanvas(e.clientX, e.clientY);
     if (pal && guideStep() === 'execute' && mode() === 'default') {
       setPendingAddLine({ ...pal, cursorX: cx, cursorY: cy });
@@ -541,7 +1020,12 @@ const App: Component = () => {
         setPendingMove({ placeId: 'pending', x: cx, y: cy });
       } else if (
         transformChoice() === 'move' ||
-        transformChoice() === 'addLine'
+        transformChoice() === 'moveCircularField' ||
+        transformChoice() === 'addLine' ||
+        (transformChoice() === 'addCircularField' &&
+          pac?.stage === 'editing' &&
+          pac.isNewPlace &&
+          pm.placeId === pac.placeId)
       ) {
         setPendingMove({ placeId: pm.placeId, x: cx, y: cy });
       }
@@ -556,10 +1040,83 @@ const App: Component = () => {
         setPendingRotate({ placeId: pr.placeId, angle });
       }
     }
+    if (
+      draggingCf != null &&
+      guideStep() === 'execute' &&
+      mode() === 'default'
+    ) {
+      const pmc = pendingModifyCircularField();
+      if (pac?.stage === 'editing' && pac.circularFieldId === draggingCf) {
+        const place = placesWithAbsolutePositions().find(
+          (p) => p.id === pac.placeId,
+        );
+        const centerX = place?.absX ?? 0;
+        const centerY = place?.absY ?? 0;
+        const dist = Math.hypot(cx - centerX, cy - centerY);
+        const radius = Math.max(CIRCULAR_FIELD_MIN_RADIUS, dist);
+        evolu.update('circularField', { id: draggingCf, radius });
+        setPendingAddCircularField({ ...pac, radius });
+      } else if (pmc && pmc.circularFieldId === draggingCf) {
+        const place = placesWithAbsolutePositions().find(
+          (p) => p.id === pmc.placeId,
+        );
+        const centerX = place?.absX ?? 0;
+        const centerY = place?.absY ?? 0;
+        const dist = Math.hypot(cx - centerX, cy - centerY);
+        const radius = Math.max(CIRCULAR_FIELD_MIN_RADIUS, dist);
+        evolu.update('circularField', { id: draggingCf, radius });
+        setPendingModifyCircularField({ ...pmc, radius });
+      }
+    }
+    const pmbf = pendingMoveBendingCircularField();
+    if (pmbf != null && guideStep() === 'execute' && mode() === 'default') {
+      const bf = bendingFieldsWithPositions().find((b) => b.id === pmbf);
+      if (bf) {
+        const ox = cx - bf.endX;
+        const oy = cy - bf.endY;
+        const L = Math.hypot(ox, oy) || 1;
+        const radius = Math.max(CIRCULAR_FIELD_MIN_RADIUS, L);
+        const s = radius / L;
+        evolu.update('bendingCircularField', {
+          id: pmbf,
+          offsetX: ox * s,
+          offsetY: oy * s,
+          radius,
+        });
+      }
+    }
+    const draggingBf = draggingBendingCircularFieldRadius();
+    if (
+      draggingBf != null &&
+      guideStep() === 'execute' &&
+      mode() === 'default'
+    ) {
+      const bf = bendingFieldsWithPositions().find((b) => b.id === draggingBf);
+      if (bf) {
+        const midX = (cx + bf.endX) / 2;
+        const midY = (cy + bf.endY) / 2;
+        const newRadius = Math.max(
+          CIRCULAR_FIELD_MIN_RADIUS,
+          Math.hypot(cx - bf.endX, cy - bf.endY) / 2,
+        );
+        const offsetX = midX - bf.endX;
+        const offsetY = midY - bf.endY;
+        evolu.update('bendingCircularField', {
+          id: draggingBf,
+          offsetX,
+          offsetY,
+          radius: newRadius,
+        });
+      }
+    }
   };
 
   const handlePointerUp = () => {
-    // No auto-advance; user clicks Continue to go to Complete
+    if (draggingCircularFieldRadius() != null) {
+      setDraggingCircularFieldRadius(null);
+    }
+    // Bending circle move/radius state is cleared in goToSelectStep on keep/discard
+    // so hasChanges stays true after drag ends and keep/discard remain enabled.
   };
 
   const zoomBy = (amount: number, originX?: number, originY?: number) => {
@@ -610,8 +1167,17 @@ const App: Component = () => {
       setPendingRotate(null);
       setPendingAddLine(null);
       setPendingDeleteLineId(null);
+      setPendingAddCircularField(null);
+      setPendingModifyCircularField(null);
+      setPendingDeleteCircularFieldId(null);
+      setDraggingCircularFieldRadius(null);
+      setPendingMoveBendingCircularField(null);
+      setDraggingBendingCircularFieldRadius(null);
+      setPendingDeleteBendingCircularFieldId(null);
       setSelectedPlaceId(null);
       setSelectedLineSegmentId(null);
+      setSelectedCircularFieldId(null);
+      setSelectedBendingCircularFieldId(null);
       setHasDrawingPaneSelected(false);
     });
   };
@@ -623,6 +1189,28 @@ const App: Component = () => {
     }
     if (choice === 'deleteLine' && selectedLineSegmentId()) {
       setPendingDeleteLineId(selectedLineSegmentId());
+    }
+    if (choice === 'modifyCircularField') {
+      const cfId = selectedCircularFieldId();
+      if (cfId) {
+        const cf = circularFieldsWithPositions().find((c) => c.id === cfId);
+        if (cf) {
+          setPendingModifyCircularField({
+            circularFieldId: cf.id,
+            placeId: cf.placeId,
+            radius: cf.radius,
+          });
+        }
+      }
+    }
+    if (choice === 'deleteCircularField' && selectedCircularFieldId()) {
+      setPendingDeleteCircularFieldId(selectedCircularFieldId());
+    }
+    if (
+      choice === 'deleteBendingCircularField' &&
+      selectedBendingCircularFieldId()
+    ) {
+      setPendingDeleteBendingCircularFieldId(selectedBendingCircularFieldId());
     }
     if (choice === 'addLine') {
       const startPlaceId = selectedPlaceId();
@@ -643,6 +1231,28 @@ const App: Component = () => {
         }
       }
     }
+    if (choice === 'addCircularField') {
+      if (hasDrawingPaneSelected()) {
+        setPendingAddCircularField({ stage: 'placing' });
+      } else {
+        const placeId = selectedPlaceId();
+        if (placeId) {
+          const r = evolu.insert('circularField', {
+            placeId,
+            radius: CIRCULAR_FIELD_DEFAULT_RADIUS,
+          });
+          if (r.ok) {
+            setPendingAddCircularField({
+              stage: 'editing',
+              placeId,
+              circularFieldId: r.value.id,
+              radius: CIRCULAR_FIELD_DEFAULT_RADIUS,
+              isNewPlace: false,
+            });
+          }
+        }
+      }
+    }
     setGuideStep('execute');
   };
 
@@ -655,14 +1265,26 @@ const App: Component = () => {
     setPendingRotate(null);
     setPendingAddLine(null);
     setPendingDeleteLineId(null);
+    setPendingAddCircularField(null);
+    setPendingModifyCircularField(null);
+    setPendingDeleteCircularFieldId(null);
+    setDraggingCircularFieldRadius(null);
+    setPendingMoveBendingCircularField(null);
+    setDraggingBendingCircularFieldRadius(null);
+    setPendingDeleteBendingCircularFieldId(null);
+    setBendAtEndsDirty(false);
     setSelectedPlaceId(null);
     setSelectedLineSegmentId(null);
+    setSelectedCircularFieldId(null);
+    setSelectedBendingCircularFieldId(null);
     setHasDrawingPaneSelected(false);
   };
 
   const handleCancelSelection = () => {
     setSelectedPlaceId(null);
     setSelectedLineSegmentId(null);
+    setSelectedCircularFieldId(null);
+    setSelectedBendingCircularFieldId(null);
     setHasDrawingPaneSelected(false);
     setTransformChoice(null);
     setGuideStep('select');
@@ -703,16 +1325,27 @@ const App: Component = () => {
         x,
         y,
         ...(nameResult.ok && { name: nameResult.value }),
+        isScaffolding: 1,
       });
       if (r.ok) {
         insertedPlaceId = r.value.id;
-        evolu.insert('transformation', {
-          kind: 'add',
-          placeId: r.value.id,
-          parentId: add.parentId,
-          x,
-          y,
-        });
+        if (add.parentId != null) {
+          recordTransformation({
+            kind: 'addRelated',
+            placeId: r.value.id,
+            parentId: add.parentId,
+            x,
+            y,
+          });
+        } else {
+          recordTransformation({
+            kind: 'add',
+            placeId: r.value.id,
+            parentId: null,
+            x,
+            y,
+          });
+        }
       }
       setPendingAdd(null);
     }
@@ -749,7 +1382,7 @@ const App: Component = () => {
           x,
           y,
         });
-        evolu.insert('transformation', {
+        recordTransformation({
           kind: 'move',
           placeId,
           parentId: parentIdForMove,
@@ -762,13 +1395,7 @@ const App: Component = () => {
 
     if (del) {
       evolu.update('place', { id: del, isDeleted: true });
-      evolu.insert('transformation', {
-        kind: 'delete',
-        placeId: del,
-        parentId: null,
-        x: null,
-        y: null,
-      });
+      recordTransformation({ kind: 'delete', placeId: del });
       setPendingDeletePlaceId(null);
     }
 
@@ -783,12 +1410,9 @@ const App: Component = () => {
         }
       }
       evolu.update('place', { id: rot.placeId, angle: storedAngle });
-      evolu.insert('transformation', {
+      recordTransformation({
         kind: 'rotate',
         placeId: rot.placeId,
-        parentId: null,
-        x: null,
-        y: null,
         angle: storedAngle,
       });
       setPendingRotate(null);
@@ -798,6 +1422,17 @@ const App: Component = () => {
     if (delLine) {
       const seg = lineSegments().find((s) => s.id === delLine);
       if (seg && seg.endAId != null && seg.endBId != null) {
+        const endA = lineSegmentEnds().find((e) => e.id === seg.endAId);
+        const placeIdForDelete =
+          endA?.placeId ??
+          lineSegmentEnds().find((e) => e.id === seg.endBId)?.placeId;
+        if (placeIdForDelete != null) {
+          recordTransformation({
+            kind: 'deleteLine',
+            placeId: placeIdForDelete,
+            lineSegmentId: delLine,
+          });
+        }
         evolu.update('lineSegment', { id: delLine, isDeleted: true });
         evolu.update('lineSegmentEnd', { id: seg.endAId, isDeleted: true });
         evolu.update('lineSegmentEnd', { id: seg.endBId, isDeleted: true });
@@ -805,11 +1440,85 @@ const App: Component = () => {
       setPendingDeleteLineId(null);
     }
 
+    const pac = pendingAddCircularField();
+    if (pac?.stage === 'editing') {
+      evolu.update('circularField', {
+        id: pac.circularFieldId,
+        radius: pac.radius,
+      });
+      if (pac.isNewPlace) {
+        const move = pendingMove();
+        const place = placesList.find((p) => p.id === pac.placeId);
+        const finalX = move?.placeId === pac.placeId ? move.x : (place?.x ?? 0);
+        const finalY = move?.placeId === pac.placeId ? move.y : (place?.y ?? 0);
+        recordTransformation({
+          kind: 'add',
+          placeId: pac.placeId,
+          parentId: null,
+          x: finalX,
+          y: finalY,
+        });
+      }
+      recordTransformation({
+        kind: 'addCircularField',
+        placeId: pac.placeId,
+        circularFieldId: pac.circularFieldId,
+        radius: pac.radius,
+      });
+      setPendingAddCircularField(null);
+    }
+
+    const pmc = pendingModifyCircularField();
+    if (pmc) {
+      recordTransformation({
+        kind: 'modifyCircularField',
+        placeId: pmc.placeId,
+        circularFieldId: pmc.circularFieldId,
+        radius: pmc.radius,
+      });
+      setPendingModifyCircularField(null);
+    }
+
+    const pdcId = pendingDeleteCircularFieldId();
+    if (pdcId) {
+      const cf = circularFields().find((c) => c.id === pdcId);
+      if (cf?.placeId != null) {
+        evolu.update('circularField', { id: pdcId, isDeleted: true });
+        recordTransformation({
+          kind: 'deleteCircularField',
+          placeId: cf.placeId,
+          circularFieldId: pdcId,
+        });
+      }
+      setPendingDeleteCircularFieldId(null);
+    }
+
+    setPendingMoveBendingCircularField(null);
+    const pdbId = pendingDeleteBendingCircularFieldId();
+    if (pdbId) {
+      evolu.update('bendingCircularField', { id: pdbId, isDeleted: true });
+      setPendingDeleteBendingCircularFieldId(null);
+    }
+
     setPendingAddLine(null);
     goToSelectStep();
   };
 
   const handleReject = () => {
+    const pac = pendingAddCircularField();
+    if (pac?.stage === 'editing') {
+      if (pac.isNewPlace) {
+        evolu.update('place', { id: pac.placeId, isDeleted: true });
+      }
+      evolu.update('circularField', {
+        id: pac.circularFieldId,
+        isDeleted: true,
+      });
+    }
+    setPendingAddCircularField(null);
+    setPendingModifyCircularField(null);
+    setPendingDeleteCircularFieldId(null);
+    setDraggingCircularFieldRadius(null);
     goToSelectStep();
   };
 
@@ -831,7 +1540,12 @@ const App: Component = () => {
   };
 
   const displayPlaces = () => {
-    const result: Array<{ id: PlaceId | 'pending'; x: number; y: number }> = [];
+    const result: Array<{
+      id: PlaceId | 'pending';
+      x: number;
+      y: number;
+      isScaffolding?: number | null;
+    }> = [];
     const pm = pendingMove();
     const pa = pendingAdd();
     const placesData = placesWithAbsolutePositions();
@@ -842,6 +1556,7 @@ const App: Component = () => {
         id: p.id,
         x: overridden ? pm.x : p.absX,
         y: overridden ? pm.y : p.absY,
+        isScaffolding: p.isScaffolding ?? null,
       });
     }
     if (pa) {
@@ -849,6 +1564,7 @@ const App: Component = () => {
         id: 'pending',
         x: pa.x,
         y: pa.y,
+        isScaffolding: 0,
       });
     }
     return result;
@@ -924,14 +1640,29 @@ const App: Component = () => {
         const tc = transformChoice();
         const gs = guideStep();
         const pr = pendingRotate();
+        const pac = pendingAddCircularField();
         const shouldDrag =
           (pm &&
             gs === 'execute' &&
             (tc === 'move' ||
+              tc === 'moveCircularField' ||
               tc === 'addLine' ||
               ((tc === 'add' || tc === 'addRelated') &&
-                pm.placeId === 'pending'))) ||
-          (pr && gs === 'execute' && tc === 'rotate');
+                pm.placeId === 'pending') ||
+              (tc === 'addCircularField' &&
+                pac?.stage === 'editing' &&
+                pac.isNewPlace &&
+                pm.placeId === pac.placeId))) ||
+          (pr && gs === 'execute' && tc === 'rotate') ||
+          (draggingCircularFieldRadius() != null &&
+            gs === 'execute' &&
+            (tc === 'addCircularField' || tc === 'modifyCircularField')) ||
+          (pendingMoveBendingCircularField() != null &&
+            gs === 'execute' &&
+            tc === 'moveBendingCircularField') ||
+          (draggingBendingCircularFieldRadius() != null &&
+            gs === 'execute' &&
+            tc === 'modifyBendingCircularField');
         if (shouldDrag) {
           isMoveDrag = true;
           onMove((moveEv) => {
@@ -992,6 +1723,8 @@ const App: Component = () => {
           step={guideStep}
           selectedPlaceId={selectedPlaceId()}
           selectedLineSegmentId={selectedLineSegmentId()}
+          selectedCircularFieldId={selectedCircularFieldId()}
+          selectedBendingCircularFieldId={selectedBendingCircularFieldId()}
           transformChoice={transformChoice()}
           onStepObserve={resetGuide}
           onStepSelect={() => setGuideStep('select')}
@@ -1002,6 +1735,8 @@ const App: Component = () => {
                 setTransformChoice(null);
                 setSelectedPlaceId(null);
                 setSelectedLineSegmentId(null);
+                setSelectedCircularFieldId(null);
+                setSelectedBendingCircularFieldId(null);
                 setHasDrawingPaneSelected(false);
               });
             } else {
@@ -1013,6 +1748,8 @@ const App: Component = () => {
             setHasDrawingPaneSelected(true);
             setSelectedPlaceId(null);
             setSelectedLineSegmentId(null);
+            setSelectedCircularFieldId(null);
+            setSelectedBendingCircularFieldId(null);
             setGuideStep('transform');
           }}
           onTransformChoice={handleTransformChoice}
@@ -1024,7 +1761,22 @@ const App: Component = () => {
           pendingMove={!!pendingMove()}
           pendingRotate={!!pendingRotate()}
           pendingAddLine={!!pendingAddLine()}
+          pendingAddCircularField={
+            pendingAddCircularField() != null &&
+            pendingAddCircularField()?.stage === 'editing'
+          }
+          pendingModifyCircularField={!!pendingModifyCircularField()}
           pendingDeleteLineId={!!pendingDeleteLineId()}
+          pendingDeleteCircularFieldId={!!pendingDeleteCircularFieldId()}
+          pendingDeleteBendingCircularFieldId={
+            !!pendingDeleteBendingCircularFieldId()
+          }
+          pendingMoveBendingCircularField={!!pendingMoveBendingCircularField()}
+          draggingBendingCircularFieldRadius={
+            !!draggingBendingCircularFieldRadius()
+          }
+          pendingBendAtEndsDirty={bendAtEndsDirty()}
+          bendAtEndsState={bendAtEndsState()}
           availableTransforms={availableTransformsList()}
           scale={scale()}
           onZoomIn={zoomIn}
@@ -1107,35 +1859,57 @@ const App: Component = () => {
                   </g>
                 );
               })()}
-            {lineSegmentsWithPositions().map((seg) => {
-              const isSelected = seg.id === selectedLineSegmentId();
-              const stroke = isSelected
-                ? svgTokens.lineSegmentSelectedStroke
-                : svgTokens.lineSegmentDefaultStroke;
-              const strokeWidth = isSelected
-                ? svgTokens.lineSegmentSelectedWidth
-                : svgTokens.lineSegmentDefaultWidth;
-              return (
-                <g class="cursor-pointer">
-                  <line
-                    x1={seg.x1}
-                    y1={seg.y1}
-                    x2={seg.x2}
-                    y2={seg.y2}
-                    stroke={stroke}
-                    stroke-width={strokeWidth}
-                  />
-                  <line
-                    x1={seg.x1}
-                    y1={seg.y1}
-                    x2={seg.x2}
-                    y2={seg.y2}
-                    stroke="transparent"
-                    stroke-width={LINE_SEGMENT_HIT_THRESHOLD * 2}
-                  />
-                </g>
-              );
-            })}
+            {(() => {
+              const segs = lineSegmentsWithPositions();
+              const fullSegs = lineSegments();
+              const bending = bendingFieldsWithPositions();
+              return segs.map((seg) => {
+                const full = fullSegs.find((s) => s.id === seg.id);
+                const bendA = full
+                  ? bending.find((b) => b.lineSegmentEndId === full.endAId)
+                  : undefined;
+                const bendB = full
+                  ? bending.find((b) => b.lineSegmentEndId === full.endBId)
+                  : undefined;
+                const pathD = buildBentSegmentPath(
+                  { x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2 },
+                  bendA,
+                  bendB,
+                );
+                const isSelected = seg.id === selectedLineSegmentId();
+                const isScaffolding = seg.isScaffolding === 1;
+                const stroke = isSelected
+                  ? svgTokens.lineSegmentSelectedStroke
+                  : isScaffolding
+                    ? svgTokens.lineSegmentScaffoldingStroke
+                    : svgTokens.lineSegmentUnselectedStroke;
+                const strokeWidth = isSelected
+                  ? svgTokens.lineSegmentSelectedWidth
+                  : isScaffolding
+                    ? svgTokens.lineSegmentScaffoldingStrokeWidth
+                    : svgTokens.lineSegmentUnselectedStrokeWidth;
+                const dasharray = isScaffolding
+                  ? svgTokens.lineSegmentScaffoldingDasharray
+                  : undefined;
+                return (
+                  <g class="cursor-pointer">
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke={stroke}
+                      stroke-width={strokeWidth}
+                      stroke-dasharray={dasharray}
+                    />
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke="transparent"
+                      stroke-width={LINE_SEGMENT_HIT_THRESHOLD * 2}
+                    />
+                  </g>
+                );
+              });
+            })()}
             {(() => {
               const pal = pendingAddLine();
               if (!pal) return null;
@@ -1153,6 +1927,135 @@ const App: Component = () => {
                   stroke-dasharray={svgTokens.pendingAddLineDasharray}
                   style={svgTokens.pointerEventsNone}
                 />
+              );
+            })()}
+            {circularFieldsWithPositions().map((cf) => (
+              <g>
+                {/* Hit area so circle interior and edge are selectable */}
+                <circle
+                  cx={cf.centerX}
+                  cy={cf.centerY}
+                  r={cf.radius}
+                  fill="transparent"
+                  stroke="none"
+                />
+                <circle
+                  cx={cf.centerX}
+                  cy={cf.centerY}
+                  r={cf.radius}
+                  fill="none"
+                  stroke={
+                    cf.id === selectedCircularFieldId()
+                      ? svgTokens.placeSelectedStroke
+                      : svgTokens.circularFieldScaffoldingStroke
+                  }
+                  stroke-width={svgTokens.circularFieldScaffoldingStrokeWidth}
+                  stroke-dasharray={svgTokens.circularFieldScaffoldingDasharray}
+                  style={svgTokens.pointerEventsNone}
+                />
+              </g>
+            ))}
+            {bendingFieldsWithPositions().map((bf) => (
+              <g>
+                <circle
+                  cx={bf.centerX}
+                  cy={bf.centerY}
+                  r={bf.radius}
+                  fill="none"
+                  stroke={
+                    bf.id === selectedBendingCircularFieldId()
+                      ? svgTokens.placeSelectedStroke
+                      : svgTokens.circularFieldScaffoldingStroke
+                  }
+                  stroke-width={svgTokens.circularFieldScaffoldingStrokeWidth}
+                  stroke-dasharray={svgTokens.circularFieldScaffoldingDasharray}
+                  style={svgTokens.pointerEventsNone}
+                />
+                <line
+                  x1={bf.centerX}
+                  y1={bf.centerY}
+                  x2={bf.endX}
+                  y2={bf.endY}
+                  stroke={
+                    bf.id === selectedBendingCircularFieldId()
+                      ? svgTokens.placeSelectedStroke
+                      : svgTokens.circularFieldScaffoldingStroke
+                  }
+                  stroke-width={svgTokens.circularFieldScaffoldingStrokeWidth}
+                  stroke-dasharray={svgTokens.circularFieldRadiusLineDasharray}
+                  style={svgTokens.pointerEventsNone}
+                />
+              </g>
+            ))}
+            {(() => {
+              const pac = pendingAddCircularField();
+              if (pac?.stage !== 'editing') return null;
+              const place = placesWithAbsolutePositions().find(
+                (p) => p.id === pac.placeId,
+              );
+              const centerX = place?.absX ?? 0;
+              const centerY = place?.absY ?? 0;
+              const handleX = centerX + pac.radius;
+              const handleY = centerY;
+              return (
+                <g>
+                  <line
+                    x1={centerX}
+                    y1={centerY}
+                    x2={handleX}
+                    y2={handleY}
+                    stroke={svgTokens.circularFieldScaffoldingStroke}
+                    stroke-width={svgTokens.circularFieldScaffoldingStrokeWidth}
+                    stroke-dasharray={
+                      svgTokens.circularFieldRadiusLineDasharray
+                    }
+                  />
+                  <line
+                    x1={centerX}
+                    y1={centerY}
+                    x2={handleX}
+                    y2={handleY}
+                    stroke="transparent"
+                    stroke-width={CIRCULAR_FIELD_RADIUS_HANDLE_THRESHOLD * 2}
+                    style={svgTokens.cursorGrab}
+                  />
+                </g>
+              );
+            })()}
+            {(() => {
+              const pmc = pendingModifyCircularField();
+              if (!pmc) return null;
+              const cf = circularFieldsWithPositions().find(
+                (c) => c.id === pmc.circularFieldId,
+              );
+              if (!cf) return null;
+              const centerX = cf.centerX;
+              const centerY = cf.centerY;
+              const handleX = centerX + pmc.radius;
+              const handleY = centerY;
+              return (
+                <g>
+                  <line
+                    x1={centerX}
+                    y1={centerY}
+                    x2={handleX}
+                    y2={handleY}
+                    stroke={svgTokens.circularFieldScaffoldingStroke}
+                    stroke-width={svgTokens.circularFieldScaffoldingStrokeWidth}
+                    stroke-dasharray={
+                      svgTokens.circularFieldRadiusLineDasharray
+                    }
+                  />
+                  <line
+                    x1={centerX}
+                    y1={centerY}
+                    x2={handleX}
+                    y2={handleY}
+                    stroke="transparent"
+                    stroke-width={CIRCULAR_FIELD_RADIUS_HANDLE_THRESHOLD * 2}
+                    style={svgTokens.cursorGrab}
+                  />
+                </g>
               );
             })()}
             {relationshipSegments().map((seg, i) => {
@@ -1225,12 +2128,20 @@ const App: Component = () => {
                 item.id === pid &&
                 tc === 'delete' &&
                 (gs === 'execute' || gs === 'complete');
+              const isScaffolding = item.isScaffolding !== 0;
               const stroke = isSelected
                 ? svgTokens.placeSelectedStroke
-                : svgTokens.placeDefaultStroke;
+                : isScaffolding
+                  ? svgTokens.placeScaffoldingStroke
+                  : svgTokens.placeUnselectedStroke;
               const strokeWidth = isSelected
                 ? svgTokens.placeSelectedStrokeWidth
-                : svgTokens.placeDefaultStrokeWidth;
+                : isScaffolding
+                  ? svgTokens.placeScaffoldingStrokeWidth
+                  : svgTokens.placeUnselectedStrokeWidth;
+              const placeDasharray = isScaffolding
+                ? svgTokens.placeScaffoldingDasharray
+                : undefined;
               const xSize = CROSSHAIR_SIZE + 6;
               return (
                 <g class="cursor-pointer">
@@ -1261,6 +2172,7 @@ const App: Component = () => {
                     y2={item.y}
                     stroke={stroke}
                     stroke-width={strokeWidth}
+                    stroke-dasharray={placeDasharray}
                   />
                   <line
                     x1={item.x}
@@ -1269,6 +2181,7 @@ const App: Component = () => {
                     y2={item.y + CROSSHAIR_SIZE}
                     stroke={stroke}
                     stroke-width={strokeWidth}
+                    stroke-dasharray={placeDasharray}
                   />
                   {isSelected && !isPendingDelete && (
                     <circle
@@ -1289,7 +2202,7 @@ const App: Component = () => {
                       r={CROSSHAIR_SIZE + 6}
                       fill="none"
                       stroke={svgTokens.placeParentStroke}
-                      stroke-width={svgTokens.placeDefaultStrokeWidth}
+                      stroke-width={svgTokens.placeUnselectedStrokeWidth}
                       stroke-dasharray={svgTokens.placeRelationCircleDasharray}
                       style={svgTokens.pointerEventsNone}
                     />
@@ -1301,7 +2214,7 @@ const App: Component = () => {
                       r={CROSSHAIR_SIZE + 6}
                       fill="none"
                       stroke={svgTokens.placeChildStroke}
-                      stroke-width={svgTokens.placeDefaultStrokeWidth}
+                      stroke-width={svgTokens.placeUnselectedStrokeWidth}
                       stroke-dasharray={svgTokens.placeRelationCircleDasharray}
                       style={svgTokens.pointerEventsNone}
                     />

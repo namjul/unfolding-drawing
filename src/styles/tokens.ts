@@ -77,6 +77,8 @@ export const classes = {
   listIndent2: 'pl-8',
   listIndent3: 'pl-12',
   listIndent4: 'pl-16',
+  listScaffoldingIndicator: 'w-4 shrink-0 text-slate-400 text-xs',
+  listRowWithIndicator: 'flex items-center gap-1 min-w-0',
 } as const;
 
 export const listIndentClasses = [
@@ -103,11 +105,11 @@ export const viewControls = {
 // SVG / canvas visual constants
 export const svg = {
   // Place markers
-  placeDefaultStroke: 'coral',
+  placeUnselectedStroke: '#999999',
   placeSelectedStroke: 'darkorange',
   placeParentStroke: '#0ea5e9',
   placeChildStroke: '#10b981',
-  placeDefaultStrokeWidth: 2,
+  placeUnselectedStrokeWidth: 1,
   placeSelectedStrokeWidth: 3,
   placeSelectedCircleDasharray: '6 3',
   placeRelationCircleDasharray: '4 4',
@@ -119,10 +121,24 @@ export const svg = {
   orientationAxisFill: 'black',
 
   // Line segments
-  lineSegmentDefaultStroke: '#374151',
+  lineSegmentUnselectedStroke: '#374151',
   lineSegmentSelectedStroke: 'darkorange',
-  lineSegmentDefaultWidth: 2,
+  lineSegmentUnselectedStrokeWidth: 2,
   lineSegmentSelectedWidth: 3,
+
+  // Scaffolding (places and line segments)
+  placeScaffoldingStroke: '#999999',
+  placeScaffoldingStrokeWidth: 1,
+  placeScaffoldingDasharray: '4 4',
+  lineSegmentScaffoldingStroke: '#374151',
+  lineSegmentScaffoldingStrokeWidth: 2,
+  lineSegmentScaffoldingDasharray: '6 3',
+
+  // Circular field (scaffolding)
+  circularFieldScaffoldingStroke: '#999999',
+  circularFieldScaffoldingStrokeWidth: 1,
+  circularFieldScaffoldingDasharray: '4 4',
+  circularFieldRadiusLineDasharray: '4 4',
 
   // Pending add line
   pendingAddLineStroke: '#374151',

@@ -1,8 +1,16 @@
 import { String1000 } from '@evolu/common';
 import type { Component } from 'solid-js';
 import { createSignal } from 'solid-js';
-import type { LineSegmentEndId, LineSegmentId, PlaceId } from '../lib/evolu-db';
+import type {
+  BendingCircularFieldId,
+  CircularFieldId,
+  LineSegmentEndId,
+  LineSegmentId,
+  PlaceId,
+} from '../lib/evolu-db';
 import {
+  allBendingCircularFieldsQuery,
+  allCircularFieldsQuery,
   allLineSegmentEndsQuery,
   allLineSegmentsQuery,
   allPlacesQuery,
@@ -12,12 +20,36 @@ import { lineSegmentEndDisplayName } from '../lib/lineSegmentEndName';
 import { useQuery } from '../lib/useQuery';
 import { classes, listIndentClasses } from '../styles/tokens';
 
+function CircularFieldTreeNode(props: {
+  field: {
+    id: CircularFieldId;
+    placeId: PlaceId;
+    radius: number;
+  };
+  depth: number;
+}) {
+  const indentClass =
+    listIndentClasses[Math.min(props.depth, listIndentClasses.length - 1)];
+  const displayLabel = () =>
+    `Circular field (r: ${Number(props.field.radius)})`;
+  return (
+    <li
+      class={`${classes.listRowWithIndicator} ${classes.listItem}`}
+      title={props.field.id}
+    >
+      <span class={classes.listScaffoldingIndicator}>#</span>
+      <span class={`${indentClass} flex-1 min-w-0`}>{displayLabel()}</span>
+    </li>
+  );
+}
+
 function LineSegmentTreeNode(props: {
   segment: {
     id: LineSegmentId;
     endAId: LineSegmentEndId;
     endBId: LineSegmentEndId;
     name: string | null;
+    isScaffolding: number | null;
   };
   places: ReadonlyArray<{ id: PlaceId; name: string | null }>;
   ends: ReadonlyArray<{
@@ -30,6 +62,7 @@ function LineSegmentTreeNode(props: {
     endAId: LineSegmentEndId;
     endBId: LineSegmentEndId;
     name: string | null;
+    isScaffolding: number | null;
   }>;
   depth: number;
 }) {
@@ -40,6 +73,7 @@ function LineSegmentTreeNode(props: {
   const displayName = () => props.segment.name?.trim() || 'Line segment';
   const indentClass =
     listIndentClasses[Math.min(props.depth, listIndentClasses.length - 1)];
+  const showScaffolding = () => props.segment.isScaffolding === 1;
 
   const startEditing = () => {
     setEditValue(displayName());
@@ -106,34 +140,61 @@ function LineSegmentTreeNode(props: {
   };
 
   return (
-    <li class={`${classes.listItem} ${indentClass}`} title={props.segment.id}>
-      {!isEditing() ? (
-        <button
-          type="button"
-          class={classes.listItemPlaceButton}
-          onClick={startEditing}
-        >
-          {displayName()}
-        </button>
-      ) : (
-        <div class="flex flex-col gap-0.5">
-          <input
-            type="text"
-            value={editValue()}
-            onInput={(e) => setEditValue(e.currentTarget.value)}
-            onBlur={commitRename}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitRename();
-              if (e.key === 'Escape') cancelEditing();
-            }}
-            class={classes.inputRename}
-            ref={(el) => isEditing() && el?.focus()}
-          />
-          {errorMessage() && (
-            <span class={classes.inputRenameError}>{errorMessage()}</span>
-          )}
-        </div>
-      )}
+    <li
+      class={`${classes.listRowWithIndicator} ${classes.listItem}`}
+      title={props.segment.id}
+    >
+      <span class={classes.listScaffoldingIndicator}>
+        {showScaffolding() ? '#' : '\u00A0'}
+      </span>
+      <span class={`${indentClass} flex-1 min-w-0`}>
+        {!isEditing() ? (
+          <button
+            type="button"
+            class={classes.listItemPlaceButton}
+            onClick={startEditing}
+          >
+            {displayName()}
+          </button>
+        ) : (
+          <div class="flex flex-col gap-0.5">
+            <input
+              type="text"
+              value={editValue()}
+              onInput={(e) => setEditValue(e.currentTarget.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename();
+                if (e.key === 'Escape') cancelEditing();
+              }}
+              class={classes.inputRename}
+              ref={(el) => isEditing() && el?.focus()}
+            />
+            {errorMessage() && (
+              <span class={classes.inputRenameError}>{errorMessage()}</span>
+            )}
+          </div>
+        )}
+      </span>
+    </li>
+  );
+}
+
+function BendingCircularFieldTreeNode(props: {
+  field: { id: BendingCircularFieldId; radius: number };
+  depth: number;
+}) {
+  const indentClass =
+    listIndentClasses[Math.min(props.depth, listIndentClasses.length - 1)];
+  return (
+    <li
+      class={`${classes.listRowWithIndicator} ${classes.listItem}`}
+      title={props.field.id}
+    >
+      <span class={classes.listScaffoldingIndicator}>#</span>
+      <span class={`${indentClass} flex-1 min-w-0`}>
+        Bending circle (r: {Number(props.field.radius)})
+      </span>
     </li>
   );
 }
@@ -150,8 +211,14 @@ function LineSegmentEndTreeNode(props: {
     endAId: LineSegmentEndId;
     endBId: LineSegmentEndId;
     name: string | null;
+    isScaffolding: number | null;
   }>;
   places: ReadonlyArray<{ id: PlaceId; name: string | null }>;
+  bendingCircularFields: ReadonlyArray<{
+    id: BendingCircularFieldId;
+    lineSegmentEndId: LineSegmentEndId;
+    radius: number;
+  }>;
   depth: number;
 }) {
   const end = () => props.ends.find((e) => e.id === props.endId);
@@ -171,13 +238,27 @@ function LineSegmentEndTreeNode(props: {
     props.segments.filter(
       (s) => s.endAId === props.endId || s.endBId === props.endId,
     );
+  const bendingFieldsForThisEnd = () =>
+    props.bendingCircularFields.filter(
+      (b) => b.lineSegmentEndId === props.endId,
+    );
   const indentClass =
     listIndentClasses[Math.min(props.depth, listIndentClasses.length - 1)];
   return (
     <>
-      <li class={`${classes.listItem} ${indentClass}`} title={props.endId}>
-        {displayName()}
+      <li
+        class={`${classes.listRowWithIndicator} ${classes.listItem}`}
+        title={props.endId}
+      >
+        <span class={classes.listScaffoldingIndicator}>#</span>
+        <span class={`${indentClass} flex-1 min-w-0`}>{displayName()}</span>
       </li>
+      {bendingFieldsForThisEnd().map((field) => (
+        <BendingCircularFieldTreeNode
+          field={{ id: field.id, radius: field.radius }}
+          depth={props.depth + 1}
+        />
+      ))}
       {lineSegmentsForThisEnd().map((seg) => (
         <LineSegmentTreeNode
           segment={seg}
@@ -240,6 +321,7 @@ function PlaceTreeNode(props: {
     x: number | null;
     y: number | null;
     name: string | null;
+    isScaffolding: number | null;
   };
   places: ReadonlyArray<{
     id: PlaceId;
@@ -247,6 +329,7 @@ function PlaceTreeNode(props: {
     x: number | null;
     y: number | null;
     name: string | null;
+    isScaffolding: number | null;
   }>;
   ends: ReadonlyArray<{
     id: LineSegmentEndId;
@@ -258,6 +341,17 @@ function PlaceTreeNode(props: {
     endAId: LineSegmentEndId;
     endBId: LineSegmentEndId;
     name: string | null;
+    isScaffolding: number | null;
+  }>;
+  circularFields: ReadonlyArray<{
+    id: CircularFieldId;
+    placeId: PlaceId;
+    radius: number;
+  }>;
+  bendingCircularFields: ReadonlyArray<{
+    id: BendingCircularFieldId;
+    lineSegmentEndId: LineSegmentEndId;
+    radius: number;
   }>;
   depth: number;
 }) {
@@ -269,9 +363,12 @@ function PlaceTreeNode(props: {
     props.places.filter((p) => p.parentId === props.place.id);
   const endsForThisPlace = () =>
     props.ends.filter((e) => e.placeId === props.place.id);
+  const circularFieldsForThisPlace = () =>
+    props.circularFields.filter((f) => f.placeId === props.place.id);
   const indentClass =
     listIndentClasses[Math.min(props.depth, listIndentClasses.length - 1)];
   const displayName = () => props.place.name?.trim() || 'Place';
+  const showScaffolding = () => props.place.isScaffolding !== 0;
 
   const startEditing = () => {
     setEditValue(displayName());
@@ -348,45 +445,54 @@ function PlaceTreeNode(props: {
   return (
     <>
       <li
-        class={`${classes.listItem} ${indentClass}`}
+        class={`${classes.listRowWithIndicator} ${classes.listItem}`}
         title={`${props.place.id} (${props.place.x}, ${props.place.y})${
           props.place.parentId ? ' relative to parent' : ''
         }`}
       >
-        {!isEditing() ? (
-          <button
-            type="button"
-            class={classes.listItemPlaceButton}
-            onClick={startEditing}
-          >
-            {displayName()}
-          </button>
-        ) : (
-          <div class="flex flex-col gap-0.5">
-            <input
-              type="text"
-              value={editValue()}
-              onInput={(e) => setEditValue(e.currentTarget.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename();
-                if (e.key === 'Escape') cancelEditing();
-              }}
-              class={classes.inputRename}
-              ref={(el) => isEditing() && el?.focus()}
-            />
-            {errorMessage() && (
-              <span class={classes.inputRenameError}>{errorMessage()}</span>
-            )}
-          </div>
-        )}
+        <span class={classes.listScaffoldingIndicator}>
+          {showScaffolding() ? '#' : '\u00A0'}
+        </span>
+        <span class={`${indentClass} flex-1 min-w-0`}>
+          {!isEditing() ? (
+            <button
+              type="button"
+              class={classes.listItemPlaceButton}
+              onClick={startEditing}
+            >
+              {displayName()}
+            </button>
+          ) : (
+            <div class="flex flex-col gap-0.5">
+              <input
+                type="text"
+                value={editValue()}
+                onInput={(e) => setEditValue(e.currentTarget.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') cancelEditing();
+                }}
+                class={classes.inputRename}
+                ref={(el) => isEditing() && el?.focus()}
+              />
+              {errorMessage() && (
+                <span class={classes.inputRenameError}>{errorMessage()}</span>
+              )}
+            </div>
+          )}
+        </span>
       </li>
+      {circularFieldsForThisPlace().map((field) => (
+        <CircularFieldTreeNode field={field} depth={props.depth + 1} />
+      ))}
       {endsForThisPlace().map((end) => (
         <LineSegmentEndTreeNode
           endId={end.id}
           ends={props.ends}
           segments={props.segments}
           places={props.places}
+          bendingCircularFields={props.bendingCircularFields}
           depth={props.depth + 1}
         />
       ))}
@@ -396,6 +502,8 @@ function PlaceTreeNode(props: {
           places={props.places}
           ends={props.ends}
           segments={props.segments}
+          circularFields={props.circularFields}
+          bendingCircularFields={props.bendingCircularFields}
           depth={props.depth + 1}
         />
       ))}
@@ -407,7 +515,28 @@ const DrawingObjectsList: Component = () => {
   const rows = useQuery(allPlacesQuery);
   const endsRows = useQuery(allLineSegmentEndsQuery);
   const segmentsRows = useQuery(allLineSegmentsQuery);
+  const circularFieldsRows = useQuery(allCircularFieldsQuery);
+  const bendingCircularFieldsRows = useQuery(allBendingCircularFieldsQuery);
   const roots = () => rows().filter((p) => p.parentId === null);
+  const circularFields = () =>
+    circularFieldsRows()
+      .filter((f): f is typeof f & { placeId: PlaceId } => f.placeId != null)
+      .map((f) => ({
+        id: f.id,
+        placeId: f.placeId,
+        radius: Number(f.radius),
+      }));
+  const bendingCircularFields = () =>
+    bendingCircularFieldsRows()
+      .filter(
+        (f): f is typeof f & { lineSegmentEndId: LineSegmentEndId } =>
+          f.lineSegmentEndId != null,
+      )
+      .map((f) => ({
+        id: f.id,
+        lineSegmentEndId: f.lineSegmentEndId,
+        radius: Number(f.radius),
+      }));
   const ends = () =>
     endsRows().filter(
       (e): e is typeof e & { placeId: PlaceId } => e.placeId != null,
@@ -428,13 +557,22 @@ const DrawingObjectsList: Component = () => {
         <p class={classes.listEmpty}>No places yet.</p>
       ) : (
         <ul class="list-none text-xs space-y-1">
-          <li class={classes.listHeaderRow}>Drawing Pane (root)</li>
+          <li
+            class={`${classes.listRowWithIndicator} ${classes.listHeaderRow}`}
+          >
+            <span class={classes.listScaffoldingIndicator}>{'\u00A0'}</span>
+            <span class={`${classes.listIndent0} flex-1 min-w-0`}>
+              Drawing Pane (root)
+            </span>
+          </li>
           {roots().map((place) => (
             <PlaceTreeNode
               place={place}
               places={rows()}
               ends={ends()}
               segments={segments()}
+              circularFields={circularFields()}
+              bendingCircularFields={bendingCircularFields()}
               depth={1}
             />
           ))}

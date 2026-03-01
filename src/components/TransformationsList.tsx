@@ -1,18 +1,31 @@
 import type { Component } from 'solid-js';
 import { createMemo } from 'solid-js';
-import type { PlaceId } from '../lib/evolu-db';
-import { allPlacesQuery, allTransformationsQuery } from '../lib/evolu-db';
+import type { LineSegmentId, PlaceId } from '../lib/evolu-db';
+import {
+  allLineSegmentsQuery,
+  allPlacesQuery,
+  allTransformationsQuery,
+} from '../lib/evolu-db';
 import { useQuery } from '../lib/useQuery';
 import { classes } from '../styles/tokens';
 
 const TransformationsList: Component = () => {
   const rows = useQuery(allTransformationsQuery);
   const places = useQuery(allPlacesQuery);
+  const segments = useQuery(allLineSegmentsQuery);
 
   const placeNameById = createMemo(() => {
     const map = new Map<PlaceId, string>();
     for (const p of places()) {
       map.set(p.id, p.name?.trim() || 'Place');
+    }
+    return map;
+  });
+
+  const segmentNameById = createMemo(() => {
+    const map = new Map<LineSegmentId, string>();
+    for (const s of segments()) {
+      map.set(s.id, s.name?.trim() || 'Line segment');
     }
     return map;
   });
@@ -28,15 +41,29 @@ const TransformationsList: Component = () => {
               t.placeId != null
                 ? (placeNameById().get(t.placeId) ?? 'Place')
                 : 'Place';
+            const segmentName =
+              t.lineSegmentId != null
+                ? (segmentNameById().get(t.lineSegmentId) ?? 'Line segment')
+                : 'Line segment';
             return (
               <li class={classes.listItem} title={t.id}>
                 {t.kind === 'add' &&
                   `Add ${placeName} at (${t.x ?? '?'}, ${t.y ?? '?'})`}
+                {t.kind === 'addRelated' &&
+                  `Add related place ${placeName} at (${t.x ?? '?'}, ${t.y ?? '?'})`}
                 {t.kind === 'move' &&
                   `Move ${placeName} to (${t.x ?? '?'}, ${t.y ?? '?'})`}
                 {t.kind === 'delete' && `Delete ${placeName}`}
                 {t.kind === 'rotate' &&
                   `Rotate ${placeName} (angle: ${t.angle ?? '?'})`}
+                {t.kind === 'addLine' && `Add line ${segmentName}`}
+                {t.kind === 'deleteLine' && `Delete line ${segmentName}`}
+                {t.kind === 'addCircularField' &&
+                  `Add circular field at ${placeName} (radius: ${t.radius ?? '?'})`}
+                {t.kind === 'modifyCircularField' &&
+                  `Modify circular field at ${placeName} (radius: ${t.radius ?? '?'})`}
+                {t.kind === 'deleteCircularField' &&
+                  `Delete circular field at ${placeName}`}
               </li>
             );
           })}

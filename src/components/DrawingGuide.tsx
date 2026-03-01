@@ -1,6 +1,11 @@
 import type { Accessor, Component } from 'solid-js';
 import { createEffect, createSignal } from 'solid-js';
-import type { LineSegmentId, PlaceId } from '../lib/evolu-db';
+import type {
+  BendingCircularFieldId,
+  CircularFieldId,
+  LineSegmentId,
+  PlaceId,
+} from '../lib/evolu-db';
 import type { TransformChoice } from '../lib/transform-matrix';
 import { classes, collapseContentStyle } from '../styles/tokens';
 import ViewControls from './ViewControls';
@@ -20,6 +25,8 @@ interface DrawingGuideProps {
   step: Accessor<GuideStep>;
   selectedPlaceId: PlaceId | null;
   selectedLineSegmentId: LineSegmentId | null;
+  selectedCircularFieldId: CircularFieldId | null;
+  selectedBendingCircularFieldId: BendingCircularFieldId | null;
   transformChoice: TransformChoice;
   onStepObserve: () => void;
   onStepSelect: () => void;
@@ -35,7 +42,22 @@ interface DrawingGuideProps {
   pendingMove: boolean;
   pendingRotate: boolean;
   pendingAddLine: boolean;
+  pendingAddCircularField: boolean;
+  pendingModifyCircularField: boolean;
   pendingDeleteLineId: boolean;
+  pendingDeleteCircularFieldId: boolean;
+  pendingDeleteBendingCircularFieldId: boolean;
+  pendingMoveBendingCircularField: boolean;
+  draggingBendingCircularFieldRadius: boolean;
+  pendingBendAtEndsDirty: boolean;
+  bendAtEndsState: {
+    endALabel: string;
+    endBLabel: string;
+    hasBendAtA: boolean;
+    hasBendAtB: boolean;
+    onToggleBendAtA: () => void;
+    onToggleBendAtB: () => void;
+  } | null;
   availableTransforms: readonly {
     id: NonNullable<TransformChoice>;
     label: string;
@@ -89,6 +111,8 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
     if (props.hasDrawingPaneSelected) return 'Canvas (Drawing Pane)';
     if (props.selectedPlaceId) return 'Place';
     if (props.selectedLineSegmentId) return 'Line segment';
+    if (props.selectedCircularFieldId) return 'Circular field';
+    if (props.selectedBendingCircularFieldId) return 'Bending field';
     return 'Select the object you want to change?';
   };
 
@@ -97,9 +121,24 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
     if (props.transformChoice === 'addRelated') return 'Add a Related Place';
     if (props.transformChoice === 'addLine') return 'Add Line';
     if (props.transformChoice === 'move') return 'Move Place';
+    if (props.transformChoice === 'moveCircularField')
+      return 'Move Circular Field';
+    if (props.transformChoice === 'modifyCircularField')
+      return 'Modify Circular Field';
     if (props.transformChoice === 'delete') return 'Delete Place';
     if (props.transformChoice === 'deleteLine') return 'Delete Line';
+    if (props.transformChoice === 'deleteCircularField')
+      return 'Delete Circular Field';
     if (props.transformChoice === 'rotate') return 'Rotate Place';
+    if (props.transformChoice === 'addCircularField')
+      return 'Add Circular Field';
+    if (props.transformChoice === 'bendAtEnds') return 'Bend at ends';
+    if (props.transformChoice === 'moveBendingCircularField')
+      return 'Move bending field';
+    if (props.transformChoice === 'modifyBendingCircularField')
+      return 'Modify bending field radius';
+    if (props.transformChoice === 'deleteBendingCircularField')
+      return 'Delete bending field';
     return 'Select the change you want to make.';
   };
 
@@ -111,9 +150,18 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
       props.pendingAdd ||
       props.pendingMove ||
       props.pendingRotate ||
+      props.pendingAddCircularField ||
+      props.pendingModifyCircularField ||
       props.pendingDeleteLineId ||
+      props.pendingDeleteCircularFieldId ||
       props.transformChoice === 'delete' ||
       props.transformChoice === 'deleteLine' ||
+      props.transformChoice === 'deleteCircularField' ||
+      props.pendingDeleteBendingCircularFieldId ||
+      props.pendingMoveBendingCircularField ||
+      props.draggingBendingCircularFieldRadius ||
+      props.pendingBendAtEndsDirty ||
+      props.transformChoice === 'deleteBendingCircularField' ||
       (props.transformChoice === 'addLine' && !props.pendingAddLine)
     );
   };
@@ -197,7 +245,9 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
               </p>
               {(props.hasDrawingPaneSelected ||
                 props.selectedPlaceId ||
-                props.selectedLineSegmentId) && (
+                props.selectedLineSegmentId ||
+                props.selectedCircularFieldId ||
+                props.selectedBendingCircularFieldId) && (
                 <button
                   type="button"
                   class={classes.buttonCancelSelection}
@@ -342,6 +392,86 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                       rotate around this place.
                     </p>
                   )}
+                  {props.transformChoice === 'addCircularField' && (
+                    <p class={classes.guideText}>
+                      Set center (click canvas or use existing place), then drag
+                      the radius handle to resize. Keep or discard when done.
+                    </p>
+                  )}
+                  {props.transformChoice === 'moveCircularField' && (
+                    <p class={classes.guideText}>
+                      Click inside the circle and drag to move its center (the
+                      parent place). Keep or discard when done.
+                    </p>
+                  )}
+                  {props.transformChoice === 'modifyCircularField' && (
+                    <p class={classes.guideText}>
+                      Drag the radius handle to change the circle size. Keep or
+                      discard when done.
+                    </p>
+                  )}
+                  {props.transformChoice === 'deleteCircularField' && (
+                    <p class={classes.guideText}>
+                      The circular field will be removed. Keep to confirm or
+                      discard to cancel.
+                    </p>
+                  )}
+                  {props.transformChoice === 'moveBendingCircularField' && (
+                    <p class={classes.guideText}>
+                      Click inside the bending circle and drag to move its
+                      center. Keep or discard when done.
+                    </p>
+                  )}
+                  {props.transformChoice === 'modifyBendingCircularField' && (
+                    <p class={classes.guideText}>
+                      Drag the radius handle (opposite the line end) to change
+                      the bend radius. Keep or discard when done.
+                    </p>
+                  )}
+                  {props.transformChoice === 'deleteBendingCircularField' && (
+                    <p class={classes.guideText}>
+                      The bending field will be removed. Keep to confirm or
+                      discard to cancel.
+                    </p>
+                  )}
+                  {props.transformChoice === 'bendAtEnds' &&
+                    props.bendAtEndsState && (
+                      <>
+                        <p class={classes.guideText}>
+                          Turn on bending at one or both ends. When on, a
+                          circular field appears at that end; move or resize it
+                          to bend the line.
+                        </p>
+                        <div class="mt-3 flex flex-col gap-2">
+                          <label class="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={props.bendAtEndsState.hasBendAtA}
+                              onChange={() =>
+                                props.bendAtEndsState?.onToggleBendAtA()
+                              }
+                              class="rounded border-slate-300"
+                            />
+                            <span class="text-sm">
+                              Bend at {props.bendAtEndsState.endALabel}
+                            </span>
+                          </label>
+                          <label class="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={props.bendAtEndsState.hasBendAtB}
+                              onChange={() =>
+                                props.bendAtEndsState?.onToggleBendAtB()
+                              }
+                              class="rounded border-slate-300"
+                            />
+                            <span class="text-sm">
+                              Bend at {props.bendAtEndsState.endBLabel}
+                            </span>
+                          </label>
+                        </div>
+                      </>
+                    )}
                 </>
               )}
 

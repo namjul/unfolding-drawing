@@ -731,6 +731,22 @@ The position of the line segment end in the drawing is taken from the place to w
 However the line segment end and the place itself are distinct drawing objects. 
 There are different operations that can be done to a line segment end and to a place, therefore it is important to distinguish between them.
 
+### Scaffolding
+Scaffolding drawing objects are drawing objects that serve as reference for other drawing objects. 
+They are visible while making the drawing but not visible in the drawing itself. 
+All drawing objects can serve as scaffolding, however some drawing objects are scaffolding only. 
+For example a place is just scaffolding. A line can be either scaffolding or visible. 
+They can be used for placing other drawing objects (Which can also be both skeleton or visible drawing objects)
+They can be used for setting relative places, eg: places that occur where two lines cross.
+They can be used for setting relative dimensions.
+
+### Circular Field
+A circular field is a scaffolding drawing object. 
+The circle is always related to a place.
+The center of the circle is at the position of its parent place. 
+A radius defines the size of the field and generated a circular scaffolding (the circumference). 
+
+
 ## Drawing Guide
 In most drawing tools a user faces many tools and choices that can be overwhelming and complicated to use (unless you are a trained professional). 
 In this application there they are constantly guided. 
@@ -760,9 +776,8 @@ There are basic transformations:
 3. Add: add another drawing object related to the selected drawing object.
 4. Change: modify a special property of the selected drawing object.
 
-#### Complete
+#### Complete Transformation
 There are two ways to complete a transformation:
 1. Commit: indicate that the transformation is complete and should become a part of the drawing.
 2. Reject: indicate htat the transformation is not desirable and should be discarded and not become a part of the drawing.
 
-aaa
