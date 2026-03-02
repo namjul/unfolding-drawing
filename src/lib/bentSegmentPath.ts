@@ -234,6 +234,96 @@ function arcAlongCircle(
 }
 
 /**
+ * SVG arc from (sx,sy) to (ex,ey) on circle (cx,cy) with radius r, chosen so that
+ * the tangent at (ex,ey) points toward (towardX, towardY). Ensures smooth join when
+ * the next segment is a line from (ex,ey) toward (towardX, towardY).
+ */
+function arcAlongCircleToward(
+  sx: number,
+  sy: number,
+  ex: number,
+  ey: number,
+  cx: number,
+  cy: number,
+  r: number,
+  towardX: number,
+  towardY: number,
+): string {
+  const angleStart = Math.atan2(sy - cy, sx - cx);
+  const angleEnd = Math.atan2(ey - cy, ex - cx);
+  const dx = towardX - ex;
+  const dy = towardY - ey;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-10) return arcAlongCircle(sx, sy, ex, ey, cx, cy, r);
+  const wantTx = dx / len;
+  const wantTy = dy / len;
+  const rx = ex - cx;
+  const ry = ey - cy;
+  const tangentCwX = ry;
+  const tangentCwY = -rx;
+  const tangentCcwX = -ry;
+  const tangentCcwY = rx;
+  const dotCw = wantTx * tangentCwX + wantTy * tangentCwY;
+  const dotCcw = wantTx * tangentCcwX + wantTy * tangentCcwY;
+  let sweep = angleEnd - angleStart;
+  if (sweep > Math.PI) sweep -= 2 * Math.PI;
+  if (sweep < -Math.PI) sweep += 2 * Math.PI;
+  const shortSweep = sweep;
+  const longSweep = sweep >= 0 ? sweep - 2 * Math.PI : sweep + 2 * Math.PI;
+  const shortTangentMatches = (shortSweep > 0 ? dotCcw > 0 : dotCw > 0);
+  const useLong = !shortTangentMatches;
+  const finalSweep = useLong ? longSweep : shortSweep;
+  const largeArc = Math.abs(finalSweep) > Math.PI ? 1 : 0;
+  const sweepFlag = finalSweep > 0 ? 1 : 0;
+  return `A ${r} ${r} 0 ${largeArc} ${sweepFlag} ${ex} ${ey}`;
+}
+
+/**
+ * SVG arc from (sx,sy) to (ex,ey) on circle (cx,cy) with radius r, chosen so that
+ * the tangent at the start (sx,sy) points toward (towardX, towardY). Ensures smooth join
+ * when the previous segment is a line arriving at (sx,sy) from the direction of (towardX, towardY).
+ */
+function arcFromCircleTowardStart(
+  sx: number,
+  sy: number,
+  ex: number,
+  ey: number,
+  cx: number,
+  cy: number,
+  r: number,
+  towardX: number,
+  towardY: number,
+): string {
+  const angleStart = Math.atan2(sy - cy, sx - cx);
+  const angleEnd = Math.atan2(ey - cy, ex - cx);
+  const dx = towardX - sx;
+  const dy = towardY - sy;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-10) return arcAlongCircle(sx, sy, ex, ey, cx, cy, r);
+  const wantTx = dx / len;
+  const wantTy = dy / len;
+  const rx = sx - cx;
+  const ry = sy - cy;
+  const tangentCwX = ry;
+  const tangentCwY = -rx;
+  const tangentCcwX = -ry;
+  const tangentCcwY = rx;
+  const dotCw = wantTx * tangentCwX + wantTy * tangentCwY;
+  const dotCcw = wantTx * tangentCcwX + wantTy * tangentCcwY;
+  let sweep = angleEnd - angleStart;
+  if (sweep > Math.PI) sweep -= 2 * Math.PI;
+  if (sweep < -Math.PI) sweep += 2 * Math.PI;
+  const shortSweep = sweep;
+  const longSweep = sweep >= 0 ? sweep - 2 * Math.PI : sweep + 2 * Math.PI;
+  const shortTangentMatches = shortSweep > 0 ? dotCcw > 0 : dotCw > 0;
+  const useLong = !shortTangentMatches;
+  const finalSweep = useLong ? longSweep : shortSweep;
+  const largeArc = Math.abs(finalSweep) > Math.PI ? 1 : 0;
+  const sweepFlag = finalSweep > 0 ? 1 : 0;
+  return `A ${r} ${r} 0 ${largeArc} ${sweepFlag} ${ex} ${ey}`;
+}
+
+/**
  * Build SVG path for the segment, bending around circles at end A (x1,y1) and/or end B (x2,y2).
  */
 export function buildBentSegmentPath(
@@ -385,6 +475,8 @@ export function buildBentSegmentPath(
   }
 
   if (bendA && bendB) {
+    // Both circles must be respected: path always bends around both (smooth S). Bend settings
+    // are stored per end; the path is a function of both circles so changing either can change the whole path.
     const intersectsA = circleIntersectsSegment(
       x1,
       y1,
@@ -406,13 +498,8 @@ export function buildBentSegmentPath(
     if (!intersectsA && !intersectsB) {
       return `M ${x1} ${y1} L ${x2} ${y2}`;
     }
-    if (!intersectsA) {
-      return buildBentSegmentPath(seg, null, bendB);
-    }
-    if (!intersectsB) {
-      return buildBentSegmentPath(seg, bendA, null);
-    }
-    // Prefer smooth double-bend: outer common tangent so path is tangent to both circles (smooth S).
+    // Always try common-tangent path first so we bend around both circles (never through one).
+    // Do not drop a circle when it does not intersect the open segment—that would draw through it.
     const pairs = outerCommonTangentPoints(
       bendA.centerX,
       bendA.centerY,
@@ -427,36 +514,41 @@ export function buildBentSegmentPath(
       for (const { ta, tb } of pairs) {
         const sweepA = arcSweepAngle(x1, y1, ta.x, ta.y, bendA.centerX, bendA.centerY);
         const sweepB = arcSweepAngle(tb.x, tb.y, x2, y2, bendB.centerX, bendB.centerY);
-        const len =
-          bendA.radius * Math.abs(sweepA) +
-          Math.hypot(tb.x - ta.x, tb.y - ta.y) +
-          bendB.radius * Math.abs(sweepB);
-        if (len < bestLen) {
-          bestLen = len;
+        const arcLen =
+          bendA.radius * Math.abs(sweepA) + bendB.radius * Math.abs(sweepB);
+        if (arcLen < bestLen) {
+          bestLen = arcLen;
           best = { ta, tb };
         }
       }
-      const arcA = arcAlongCircle(
+      const ta = best.ta;
+      const tb = best.tb;
+      const arcA = arcAlongCircleToward(
         x1,
         y1,
-        best.ta.x,
-        best.ta.y,
+        ta.x,
+        ta.y,
         bendA.centerX,
         bendA.centerY,
         bendA.radius,
+        tb.x,
+        tb.y,
       );
-      const arcB = arcAlongCircle(
-        best.tb.x,
-        best.tb.y,
+      const arcB = arcFromCircleTowardStart(
+        tb.x,
+        tb.y,
         x2,
         y2,
         bendB.centerX,
         bendB.centerY,
         bendB.radius,
+        2 * tb.x - ta.x,
+        2 * tb.y - ta.y,
       );
-      return `M ${x1} ${y1} ${arcA} L ${best.tb.x} ${best.tb.y} ${arcB}`;
+      return `M ${x1} ${y1} ${arcA} L ${tb.x} ${tb.y} ${arcB}`;
     }
-    // Fallback: intersection-based (independent per end but sharp corners at PA, PB).
+    // Fallback when no common tangents: still bend around both circles (arc A, line, arc B).
+    // Use segment–circle intersection when available; otherwise tangent from the other segment end.
     const tsA = lineCircleIntersections(
       x1,
       y1,
@@ -477,33 +569,88 @@ export function buildBentSegmentPath(
     );
     const otherThanA = tsA.filter((t) => t > 0.01);
     const otherThanB = tsB.filter((t) => t < 0.99);
-    if (otherThanA.length === 0 || otherThanB.length === 0) {
-      return `M ${x1} ${y1} L ${x2} ${y2}`;
+    let ptA: { x: number; y: number };
+    let ptB: { x: number; y: number };
+    if (otherThanA.length > 0 && otherThanB.length > 0) {
+      const tA = Math.max(...otherThanA);
+      const tB = Math.min(...otherThanB);
+      if (tA >= tB) return `M ${x1} ${y1} L ${x2} ${y2}`;
+      ptA = pointAt(x1, y1, x2, y2, tA);
+      ptB = pointAt(x1, y1, x2, y2, tB);
+    } else {
+      // One or both circles do not intersect the open segment; use tangent from other end so we still go around both.
+      if (otherThanA.length > 0) {
+        ptA = pointAt(x1, y1, x2, y2, Math.max(...otherThanA));
+      } else {
+        const tangentsA = tangentPointsFromExternalPoint(
+          bendA.centerX,
+          bendA.centerY,
+          bendA.radius,
+          x2,
+          y2,
+        );
+        ptA = tangentsA
+          ? pickTangentForArcToEnd(
+              bendA.centerX,
+              bendA.centerY,
+              bendA.radius,
+              tangentsA.t1,
+              tangentsA.t2,
+              x1,
+              y1,
+              x2,
+              y2,
+            )
+          : { x: x1, y: y1 };
+      }
+      if (otherThanB.length > 0) {
+        ptB = pointAt(x1, y1, x2, y2, Math.min(...otherThanB));
+      } else {
+        const tangentsB = tangentPointsFromExternalPoint(
+          bendB.centerX,
+          bendB.centerY,
+          bendB.radius,
+          x1,
+          y1,
+        );
+        ptB = tangentsB
+          ? pickTangentForArcToEnd(
+              bendB.centerX,
+              bendB.centerY,
+              bendB.radius,
+              tangentsB.t1,
+              tangentsB.t2,
+              x2,
+              y2,
+              x1,
+              y1,
+            )
+          : { x: x2, y: y2 };
+      }
     }
-    const tA = Math.max(...otherThanA);
-    const tB = Math.min(...otherThanB);
-    if (tA >= tB) return `M ${x1} ${y1} L ${x2} ${y2}`;
-    const PA = pointAt(x1, y1, x2, y2, tA);
-    const PB = pointAt(x1, y1, x2, y2, tB);
-    const arcA = arcAlongCircle(
+    const arcA = arcAlongCircleToward(
       x1,
       y1,
-      PA.x,
-      PA.y,
+      ptA.x,
+      ptA.y,
       bendA.centerX,
       bendA.centerY,
       bendA.radius,
+      ptB.x,
+      ptB.y,
     );
-    const arcB = arcAlongCircle(
-      PB.x,
-      PB.y,
+    const arcB = arcFromCircleTowardStart(
+      ptB.x,
+      ptB.y,
       x2,
       y2,
       bendB.centerX,
       bendB.centerY,
       bendB.radius,
+      2 * ptB.x - ptA.x,
+      2 * ptB.y - ptA.y,
     );
-    return `M ${x1} ${y1} ${arcA} L ${PB.x} ${PB.y} ${arcB}`;
+    return `M ${x1} ${y1} ${arcA} L ${ptB.x} ${ptB.y} ${arcB}`;
   }
 
   return `M ${x1} ${y1} L ${x2} ${y2}`;
@@ -746,12 +893,6 @@ export function distanceFromPointToBentPath(
     if (!intersectsA && !intersectsB) {
       return distanceToSegment(px, py, x1, y1, x2, y2);
     }
-    if (!intersectsA) {
-      return distanceFromPointToBentPath(px, py, seg, null, bendB);
-    }
-    if (!intersectsB) {
-      return distanceFromPointToBentPath(px, py, seg, bendA, null);
-    }
     const pairs = outerCommonTangentPoints(
       bendA.centerX,
       bendA.centerY,
@@ -766,12 +907,10 @@ export function distanceFromPointToBentPath(
       for (const { ta, tb } of pairs) {
         const sweepA = arcSweepAngle(x1, y1, ta.x, ta.y, bendA.centerX, bendA.centerY);
         const sweepB = arcSweepAngle(tb.x, tb.y, x2, y2, bendB.centerX, bendB.centerY);
-        const len =
-          bendA.radius * Math.abs(sweepA) +
-          Math.hypot(tb.x - ta.x, tb.y - ta.y) +
-          bendB.radius * Math.abs(sweepB);
-        if (len < bestLen) {
-          bestLen = len;
+        const arcLen =
+          bendA.radius * Math.abs(sweepA) + bendB.radius * Math.abs(sweepB);
+        if (arcLen < bestLen) {
+          bestLen = arcLen;
           best = { ta, tb };
         }
       }
@@ -820,14 +959,64 @@ export function distanceFromPointToBentPath(
     );
     const otherThanA = tsA.filter((t) => t > 0.01);
     const otherThanB = tsB.filter((t) => t < 0.99);
-    if (otherThanA.length === 0 || otherThanB.length === 0) {
-      return distanceToSegment(px, py, x1, y1, x2, y2);
+    let ptA: { x: number; y: number };
+    let ptB: { x: number; y: number };
+    if (otherThanA.length > 0 && otherThanB.length > 0) {
+      const tA = Math.max(...otherThanA);
+      const tB = Math.min(...otherThanB);
+      if (tA >= tB) return distanceToSegment(px, py, x1, y1, x2, y2);
+      ptA = pointAt(x1, y1, x2, y2, tA);
+      ptB = pointAt(x1, y1, x2, y2, tB);
+    } else {
+      if (otherThanA.length > 0) {
+        ptA = pointAt(x1, y1, x2, y2, Math.max(...otherThanA));
+      } else {
+        const tangentsA = tangentPointsFromExternalPoint(
+          bendA.centerX,
+          bendA.centerY,
+          bendA.radius,
+          x2,
+          y2,
+        );
+        ptA = tangentsA
+          ? pickTangentForArcToEnd(
+              bendA.centerX,
+              bendA.centerY,
+              bendA.radius,
+              tangentsA.t1,
+              tangentsA.t2,
+              x1,
+              y1,
+              x2,
+              y2,
+            )
+          : { x: x1, y: y1 };
+      }
+      if (otherThanB.length > 0) {
+        ptB = pointAt(x1, y1, x2, y2, Math.min(...otherThanB));
+      } else {
+        const tangentsB = tangentPointsFromExternalPoint(
+          bendB.centerX,
+          bendB.centerY,
+          bendB.radius,
+          x1,
+          y1,
+        );
+        ptB = tangentsB
+          ? pickTangentForArcToEnd(
+              bendB.centerX,
+              bendB.centerY,
+              bendB.radius,
+              tangentsB.t1,
+              tangentsB.t2,
+              x2,
+              y2,
+              x1,
+              y1,
+            )
+          : { x: x2, y: y2 };
+      }
     }
-    const tA = Math.max(...otherThanA);
-    const tB = Math.min(...otherThanB);
-    if (tA >= tB) return distanceToSegment(px, py, x1, y1, x2, y2);
-    const PA = pointAt(x1, y1, x2, y2, tA);
-    const PB = pointAt(x1, y1, x2, y2, tB);
     const dArcA = distanceToArc(
       px,
       py,
@@ -836,18 +1025,18 @@ export function distanceFromPointToBentPath(
       bendA.radius,
       x1,
       y1,
-      PA.x,
-      PA.y,
+      ptA.x,
+      ptA.y,
     );
-    const dLine = distanceToSegment(px, py, PA.x, PA.y, PB.x, PB.y);
+    const dLine = distanceToSegment(px, py, ptA.x, ptA.y, ptB.x, ptB.y);
     const dArcB = distanceToArc(
       px,
       py,
       bendB.centerX,
       bendB.centerY,
       bendB.radius,
-      PB.x,
-      PB.y,
+      ptB.x,
+      ptB.y,
       x2,
       y2,
     );

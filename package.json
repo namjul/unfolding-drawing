@@ -21,7 +21,8 @@
     "@rsbuild/core": "^1.5.6",
     "brittle": "^3.0.0",
     "npm-run-all": "^4.1.5",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
   },
   "dependencies": {
     "@evolu/common": "^6.0.1-preview.19",
@@ -37,5 +38,20 @@
     "solid-devtools": "^0.34.4",
     "solid-js": "^1.9.9",
     "tailwindcss": "^4.1.14"
-  }
+  },
+  "description": "",
+  "directories": {
+    "doc": "docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iamronen/unfolding-drawing.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/iamronen/unfolding-drawing/issues"
+  },
+  "homepage": "https://github.com/iamronen/unfolding-drawing#readme"
 }
