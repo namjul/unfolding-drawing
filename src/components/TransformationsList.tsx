@@ -2,6 +2,7 @@ import type { Component } from 'solid-js';
 import { createMemo } from 'solid-js';
 import type { LineSegmentId, PlaceId } from '../lib/evolu-db';
 import {
+  allAxesQuery,
   allLineSegmentsQuery,
   allPlacesQuery,
   allTransformationsQuery,
@@ -10,9 +11,10 @@ import { useQuery } from '../lib/useQuery';
 import { classes } from '../styles/tokens';
 
 const TransformationsList: Component = () => {
-  const rows = useQuery(allTransformationsQuery);
-  const places = useQuery(allPlacesQuery);
-  const segments = useQuery(allLineSegmentsQuery);
+  const { rows } = useQuery(allTransformationsQuery);
+  const { rows: places } = useQuery(allPlacesQuery);
+  const { rows: segments } = useQuery(allLineSegmentsQuery);
+  const { rows: axes } = useQuery(allAxesQuery);
 
   const placeNameById = createMemo(() => {
     const map = new Map<PlaceId, string>();
@@ -26,6 +28,14 @@ const TransformationsList: Component = () => {
     const map = new Map<LineSegmentId, string>();
     for (const s of segments()) {
       map.set(s.id, s.name?.trim() || 'Line segment');
+    }
+    return map;
+  });
+
+  const axisPlaceIdById = createMemo(() => {
+    const map = new Map<string, PlaceId>();
+    for (const a of axes()) {
+      if (a.placeId != null) map.set(a.id, a.placeId);
     }
     return map;
   });
@@ -45,6 +55,12 @@ const TransformationsList: Component = () => {
               t.lineSegmentId != null
                 ? (segmentNameById().get(t.lineSegmentId) ?? 'Line segment')
                 : 'Line segment';
+            const axisOwnerPlaceId =
+              t.axisId != null ? axisPlaceIdById().get(t.axisId) : undefined;
+            const axisOwnerName =
+              axisOwnerPlaceId != null
+                ? (placeNameById().get(axisOwnerPlaceId) ?? 'Place')
+                : 'Place';
             return (
               <li class={classes.listItem} title={t.id}>
                 {t.kind === 'add' &&
@@ -64,6 +80,20 @@ const TransformationsList: Component = () => {
                   `Modify circular field at ${placeName} (radius: ${t.radius ?? '?'})`}
                 {t.kind === 'deleteCircularField' &&
                   `Delete circular field at ${placeName}`}
+                {t.kind === 'addBendingCircularField' &&
+                  `Add bending field on ${segmentName}`}
+                {t.kind === 'modifyBendingCircularField' &&
+                  `Modify bending field on ${segmentName}`}
+                {t.kind === 'deleteBendingCircularField' &&
+                  `Delete bending field on ${segmentName}`}
+                {t.kind === 'splitLine' &&
+                  `Split line ${segmentName} into two segments`}
+                {t.kind === 'addAxis' && `Add axis at ${placeName}`}
+                {t.kind === 'modifyAxis' &&
+                  `Modify axis at ${placeName} (angle: ${t.angle ?? '?'})`}
+                {t.kind === 'deleteAxis' && `Delete axis at ${placeName}`}
+                {t.kind === 'addPlaceOnAxis' &&
+                  `Add ${placeName} on axis at ${axisOwnerName}`}
               </li>
             );
           })}

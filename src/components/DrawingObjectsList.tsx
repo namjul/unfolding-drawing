@@ -2,6 +2,7 @@ import { String1000 } from '@evolu/common';
 import type { Component } from 'solid-js';
 import { createSignal } from 'solid-js';
 import type {
+  AxisId,
   BendingCircularFieldId,
   CircularFieldId,
   LineSegmentEndId,
@@ -9,6 +10,7 @@ import type {
   PlaceId,
 } from '../lib/evolu-db';
 import {
+  allAxesQuery,
   allBendingCircularFieldsQuery,
   allCircularFieldsQuery,
   allLineSegmentEndsQuery,
@@ -19,6 +21,73 @@ import {
 import { lineSegmentEndDisplayName } from '../lib/lineSegmentEndName';
 import { useQuery } from '../lib/useQuery';
 import { classes, listIndentClasses } from '../styles/tokens';
+
+type PlaceWithAxis = {
+  id: PlaceId;
+  parentId: PlaceId | null;
+  parentAxisId?: AxisId | null;
+  name: string | null;
+  x: number;
+  y: number;
+  angle: number | null;
+  isScaffolding: number | null;
+};
+
+function AxisTreeNode(props: {
+  axis: { id: AxisId; placeId: PlaceId; angle: number };
+  placesOnAxis: ReadonlyArray<PlaceWithAxis>;
+  places: ReadonlyArray<PlaceWithAxis>;
+  ends: ReadonlyArray<{ id: LineSegmentEndId; placeId: PlaceId; name: string | null }>;
+  segments: ReadonlyArray<{
+    id: LineSegmentId;
+    endAId: LineSegmentEndId;
+    endBId: LineSegmentEndId;
+    name: string | null;
+    isScaffolding: number | null;
+  }>;
+  circularFields: ReadonlyArray<{ id: CircularFieldId; placeId: PlaceId; radius: number }>;
+  bendingCircularFields: ReadonlyArray<{ id: BendingCircularFieldId; lineSegmentEndId: LineSegmentEndId; radius: number }>;
+  depth: number;
+  onSelectAxis?: ((id: AxisId) => void) | undefined;
+  selectedAxisId?: AxisId | null | undefined;
+}) {
+  const indentClass =
+    listIndentClasses[Math.min(props.depth, listIndentClasses.length - 1)];
+  const isSelected = () => props.selectedAxisId === props.axis.id;
+  return (
+    <>
+      <li
+        class={`${classes.listRowWithIndicator} ${classes.listItem} ${isSelected() ? 'ring-1 ring-green-400 rounded' : ''}`}
+        title={props.axis.id}
+      >
+        <span class={classes.listScaffoldingIndicator}>#</span>
+        <span class={`${indentClass} flex-1 min-w-0`}>
+          <button
+            type="button"
+            class={classes.listItemPlaceButton}
+            onClick={() => props.onSelectAxis?.(props.axis.id)}
+          >
+            Axis
+          </button>
+        </span>
+      </li>
+      {props.placesOnAxis.map((place) => (
+        <PlaceTreeNode
+          place={place}
+          places={props.places}
+          ends={props.ends}
+          segments={props.segments}
+          circularFields={props.circularFields}
+          bendingCircularFields={props.bendingCircularFields}
+          axes={[] as ReadonlyArray<{ id: AxisId; placeId: PlaceId; angle: number }>}
+          depth={props.depth + 1}
+          onSelectAxis={props.onSelectAxis}
+          selectedAxisId={props.selectedAxisId}
+        />
+      ))}
+    </>
+  );
+}
 
 function CircularFieldTreeNode(props: {
   field: {
@@ -353,6 +422,9 @@ function PlaceTreeNode(props: {
     lineSegmentEndId: LineSegmentEndId;
     radius: number;
   }>;
+  axes?: ReadonlyArray<{ id: AxisId; placeId: PlaceId; angle: number }>;
+  onSelectAxis?: ((id: AxisId) => void) | undefined;
+  selectedAxisId?: AxisId | null | undefined;
   depth: number;
 }) {
   const evolu = useEvolu();
@@ -365,6 +437,12 @@ function PlaceTreeNode(props: {
     props.ends.filter((e) => e.placeId === props.place.id);
   const circularFieldsForThisPlace = () =>
     props.circularFields.filter((f) => f.placeId === props.place.id);
+  const axesForThisPlace = () =>
+    (props.axes ?? []).filter((a) => a.placeId === props.place.id);
+  const placesOnAxis = (axisId: AxisId) =>
+    props.places.filter(
+      (p) => (p as PlaceWithAxis).parentAxisId === axisId,
+    ) as PlaceWithAxis[];
   const indentClass =
     listIndentClasses[Math.min(props.depth, listIndentClasses.length - 1)];
   const displayName = () => props.place.name?.trim() || 'Place';
@@ -486,6 +564,20 @@ function PlaceTreeNode(props: {
       {circularFieldsForThisPlace().map((field) => (
         <CircularFieldTreeNode field={field} depth={props.depth + 1} />
       ))}
+      {axesForThisPlace().map((axis) => (
+        <AxisTreeNode
+          axis={{ id: axis.id, placeId: axis.placeId, angle: Number(axis.angle) }}
+          placesOnAxis={placesOnAxis(axis.id)}
+          places={props.places as PlaceWithAxis[]}
+          ends={props.ends}
+          segments={props.segments}
+          circularFields={props.circularFields}
+          bendingCircularFields={props.bendingCircularFields}
+          depth={props.depth + 1}
+          onSelectAxis={props.onSelectAxis}
+          selectedAxisId={props.selectedAxisId}
+        />
+      ))}
       {endsForThisPlace().map((end) => (
         <LineSegmentEndTreeNode
           endId={end.id}
@@ -504,6 +596,9 @@ function PlaceTreeNode(props: {
           segments={props.segments}
           circularFields={props.circularFields}
           bendingCircularFields={props.bendingCircularFields}
+          axes={props.axes ?? []}
+          onSelectAxis={props.onSelectAxis}
+          selectedAxisId={props.selectedAxisId}
           depth={props.depth + 1}
         />
       ))}
@@ -511,13 +606,23 @@ function PlaceTreeNode(props: {
   );
 }
 
-const DrawingObjectsList: Component = () => {
-  const rows = useQuery(allPlacesQuery);
-  const endsRows = useQuery(allLineSegmentEndsQuery);
-  const segmentsRows = useQuery(allLineSegmentsQuery);
-  const circularFieldsRows = useQuery(allCircularFieldsQuery);
-  const bendingCircularFieldsRows = useQuery(allBendingCircularFieldsQuery);
+const DrawingObjectsList: Component<{
+  selectedAxisId?: AxisId | null | undefined;
+  onSelectAxis?: ((id: AxisId) => void) | undefined;
+}> = (props) => {
+  const { rows } = useQuery(allPlacesQuery);
+  const { rows: endsRows } = useQuery(allLineSegmentEndsQuery);
+  const { rows: segmentsRows } = useQuery(allLineSegmentsQuery);
+  const { rows: circularFieldsRows } = useQuery(allCircularFieldsQuery);
+  const { rows: bendingCircularFieldsRows } = useQuery(
+    allBendingCircularFieldsQuery,
+  );
+  const { rows: axesRows } = useQuery(allAxesQuery);
   const roots = () => rows().filter((p) => p.parentId === null);
+  const axes = () =>
+    axesRows().filter(
+      (a): a is typeof a & { placeId: PlaceId } => a.placeId != null,
+    );
   const circularFields = () =>
     circularFieldsRows()
       .filter((f): f is typeof f & { placeId: PlaceId } => f.placeId != null)
@@ -573,6 +678,13 @@ const DrawingObjectsList: Component = () => {
               segments={segments()}
               circularFields={circularFields()}
               bendingCircularFields={bendingCircularFields()}
+              axes={axes().map((a) => ({
+                id: a.id,
+                placeId: a.placeId,
+                angle: Number(a.angle),
+              }))}
+              onSelectAxis={props.onSelectAxis ?? undefined}
+              selectedAxisId={props.selectedAxisId ?? undefined}
               depth={1}
             />
           ))}

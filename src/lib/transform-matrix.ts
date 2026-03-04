@@ -1,4 +1,5 @@
 import type {
+  AxisId,
   BendingCircularFieldId,
   CircularFieldId,
   LineSegmentId,
@@ -10,23 +11,28 @@ export type SelectionType =
   | 'place'
   | 'lineSegment'
   | 'circularField'
-  | 'bendingCircularField';
+  | 'bendingCircularField'
+  | 'axis';
 
 export type TransformId =
   | 'add'
   | 'addRelated'
   | 'addLine'
   | 'addCircularField'
+  | 'addAxis'
+  | 'addPlaceOnAxis'
   | 'bendAtEnds'
   | 'move'
   | 'moveCircularField'
-  | 'moveBendingCircularField'
   | 'modifyCircularField'
+  | 'modifyAxis'
   | 'modifyBendingCircularField'
   | 'delete'
+  | 'deleteAxis'
   | 'deleteLine'
   | 'deleteCircularField'
   | 'deleteBendingCircularField'
+  | 'splitLine'
   | 'rotate';
 
 export type TransformChoice = TransformId | null;
@@ -55,6 +61,16 @@ export const TRANSFORMS: readonly TransformDef[] = [
     allowedSelectionTypes: ['drawingPane', 'place'],
   },
   {
+    id: 'addAxis',
+    label: 'Add Axis',
+    allowedSelectionTypes: ['place'],
+  },
+  {
+    id: 'addPlaceOnAxis',
+    label: 'Add place on axis',
+    allowedSelectionTypes: ['axis'],
+  },
+  {
     id: 'bendAtEnds',
     label: 'Bend at ends',
     allowedSelectionTypes: ['lineSegment'],
@@ -70,7 +86,17 @@ export const TRANSFORMS: readonly TransformDef[] = [
     label: 'Modify Circular Field',
     allowedSelectionTypes: ['circularField'],
   },
+  {
+    id: 'modifyAxis',
+    label: 'Modify Axis',
+    allowedSelectionTypes: ['axis'],
+  },
   { id: 'delete', label: 'Delete Place', allowedSelectionTypes: ['place'] },
+  {
+    id: 'deleteAxis',
+    label: 'Delete Axis',
+    allowedSelectionTypes: ['axis'],
+  },
   {
     id: 'deleteLine',
     label: 'Delete Line',
@@ -82,19 +108,19 @@ export const TRANSFORMS: readonly TransformDef[] = [
     allowedSelectionTypes: ['circularField'],
   },
   {
-    id: 'moveBendingCircularField',
-    label: 'Move bending field',
-    allowedSelectionTypes: ['bendingCircularField'],
-  },
-  {
     id: 'modifyBendingCircularField',
-    label: 'Modify bending field radius',
+    label: 'Modify bending field',
     allowedSelectionTypes: ['bendingCircularField'],
   },
   {
     id: 'deleteBendingCircularField',
     label: 'Delete bending field',
     allowedSelectionTypes: ['bendingCircularField'],
+  },
+  {
+    id: 'splitLine',
+    label: 'Split line segment',
+    allowedSelectionTypes: ['lineSegment'],
   },
   { id: 'rotate', label: 'Rotate Place', allowedSelectionTypes: ['place'] },
 ];
@@ -108,12 +134,14 @@ export function getSelectionType(
   selectedLineSegmentId: LineSegmentId | null,
   selectedCircularFieldId: CircularFieldId | null,
   selectedBendingCircularFieldId: BendingCircularFieldId | null,
+  selectedAxisId: AxisId | null,
 ): SelectionType | null {
   if (hasDrawingPaneSelected) return 'drawingPane';
   if (selectedPlaceId) return 'place';
   if (selectedLineSegmentId) return 'lineSegment';
   if (selectedCircularFieldId) return 'circularField';
   if (selectedBendingCircularFieldId) return 'bendingCircularField';
+  if (selectedAxisId) return 'axis';
   return null;
 }
 

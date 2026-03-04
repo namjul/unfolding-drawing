@@ -1,6 +1,7 @@
 import type { Accessor, Component } from 'solid-js';
 import { createEffect, createSignal } from 'solid-js';
 import type {
+  AxisId,
   BendingCircularFieldId,
   CircularFieldId,
   LineSegmentId,
@@ -27,6 +28,7 @@ interface DrawingGuideProps {
   selectedLineSegmentId: LineSegmentId | null;
   selectedCircularFieldId: CircularFieldId | null;
   selectedBendingCircularFieldId: BendingCircularFieldId | null;
+  selectedAxisId: AxisId | null;
   transformChoice: TransformChoice;
   onStepObserve: () => void;
   onStepSelect: () => void;
@@ -50,6 +52,11 @@ interface DrawingGuideProps {
   pendingMoveBendingCircularField: boolean;
   draggingBendingCircularFieldRadius: boolean;
   pendingBendAtEndsDirty: boolean;
+  pendingSplitLine: boolean;
+  pendingAddAxis: boolean;
+  pendingModifyAxis: boolean;
+  pendingDeleteAxisId: boolean;
+  pendingAddPlaceOnAxis: boolean;
   bendAtEndsState: {
     endALabel: string;
     endBLabel: string;
@@ -133,12 +140,14 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
     if (props.transformChoice === 'addCircularField')
       return 'Add Circular Field';
     if (props.transformChoice === 'bendAtEnds') return 'Bend at ends';
-    if (props.transformChoice === 'moveBendingCircularField')
-      return 'Move bending field';
     if (props.transformChoice === 'modifyBendingCircularField')
-      return 'Modify bending field radius';
+      return 'Modify bending field';
     if (props.transformChoice === 'deleteBendingCircularField')
       return 'Delete bending field';
+    if (props.transformChoice === 'addAxis') return 'Add Axis';
+    if (props.transformChoice === 'modifyAxis') return 'Modify Axis';
+    if (props.transformChoice === 'deleteAxis') return 'Delete Axis';
+    if (props.transformChoice === 'addPlaceOnAxis') return 'Add place on axis';
     return 'Select the change you want to make.';
   };
 
@@ -162,7 +171,15 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
       props.draggingBendingCircularFieldRadius ||
       props.pendingBendAtEndsDirty ||
       props.transformChoice === 'deleteBendingCircularField' ||
-      (props.transformChoice === 'addLine' && !props.pendingAddLine)
+      (props.transformChoice === 'bendAtEnds' &&
+        (props.pendingMoveBendingCircularField ||
+          props.draggingBendingCircularFieldRadius)) ||
+      (props.transformChoice === 'addLine' && !props.pendingAddLine) ||
+      props.pendingSplitLine ||
+      props.pendingAddAxis ||
+      props.pendingModifyAxis ||
+      props.pendingDeleteAxisId ||
+      props.pendingAddPlaceOnAxis
     );
   };
 
@@ -247,7 +264,8 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                 props.selectedPlaceId ||
                 props.selectedLineSegmentId ||
                 props.selectedCircularFieldId ||
-                props.selectedBendingCircularFieldId) && (
+                props.selectedBendingCircularFieldId ||
+                props.selectedAxisId) && (
                 <button
                   type="button"
                   class={classes.buttonCancelSelection}
@@ -416,16 +434,11 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                       discard to cancel.
                     </p>
                   )}
-                  {props.transformChoice === 'moveBendingCircularField' && (
-                    <p class={classes.guideText}>
-                      Click inside the bending circle and drag to move its
-                      center. Keep or discard when done.
-                    </p>
-                  )}
                   {props.transformChoice === 'modifyBendingCircularField' && (
                     <p class={classes.guideText}>
-                      Drag the radius handle (opposite the line end) to change
-                      the bend radius. Keep or discard when done.
+                      Drag the circle center to move the bending field, or drag
+                      the radius handle (opposite the line end) to change its
+                      radius. Keep or discard when done.
                     </p>
                   )}
                   {props.transformChoice === 'deleteBendingCircularField' && (

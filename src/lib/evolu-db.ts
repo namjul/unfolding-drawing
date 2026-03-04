@@ -28,6 +28,9 @@ export type CircularFieldId = typeof CircularFieldId.Type;
 const BendingCircularFieldId = id('BendingCircularField');
 export type BendingCircularFieldId = typeof BendingCircularFieldId.Type;
 
+const AxisId = id('Axis');
+export type AxisId = typeof AxisId.Type;
+
 const TransformationId = id('Transformation');
 export type TransformationId = typeof TransformationId.Type;
 
@@ -41,6 +44,14 @@ const DeleteLineKind = literal('deleteLine');
 const AddCircularFieldKind = literal('addCircularField');
 const ModifyCircularFieldKind = literal('modifyCircularField');
 const DeleteCircularFieldKind = literal('deleteCircularField');
+const AddBendingCircularFieldKind = literal('addBendingCircularField');
+const ModifyBendingCircularFieldKind = literal('modifyBendingCircularField');
+const DeleteBendingCircularFieldKind = literal('deleteBendingCircularField');
+const SplitLineKind = literal('splitLine');
+const AddAxisKind = literal('addAxis');
+const ModifyAxisKind = literal('modifyAxis');
+const DeleteAxisKind = literal('deleteAxis');
+const AddPlaceOnAxisKind = literal('addPlaceOnAxis');
 const TransformationKind = union(
   AddKind,
   AddRelatedKind,
@@ -52,6 +63,14 @@ const TransformationKind = union(
   AddCircularFieldKind,
   ModifyCircularFieldKind,
   DeleteCircularFieldKind,
+  AddBendingCircularFieldKind,
+  ModifyBendingCircularFieldKind,
+  DeleteBendingCircularFieldKind,
+  SplitLineKind,
+  AddAxisKind,
+  ModifyAxisKind,
+  DeleteAxisKind,
+  AddPlaceOnAxisKind,
 );
 export type TransformationKind = typeof TransformationKind.Type;
 
@@ -59,11 +78,18 @@ export const Schema = {
   place: {
     id: PlaceId,
     parentId: nullOr(PlaceId),
+    parentAxisId: nullOr(AxisId),
+    distanceAlongAxis: nullOr(FiniteNumber),
     x: FiniteNumber,
     y: FiniteNumber,
     angle: nullOr(FiniteNumber),
     name: nullOr(String1000),
     isScaffolding: nullOr(FiniteNumber),
+  },
+  axis: {
+    id: AxisId,
+    placeId: PlaceId,
+    angle: FiniteNumber,
   },
   lineSegmentEnd: {
     id: LineSegmentEndId,
@@ -98,7 +124,11 @@ export const Schema = {
     y: nullOr(FiniteNumber),
     angle: nullOr(FiniteNumber),
     lineSegmentId: nullOr(LineSegmentId),
+    lineSegmentId2: nullOr(LineSegmentId),
+    lineSegmentId3: nullOr(LineSegmentId),
     circularFieldId: nullOr(CircularFieldId),
+    bendingCircularFieldId: nullOr(BendingCircularFieldId),
+    axisId: nullOr(AxisId),
     radius: nullOr(FiniteNumber),
   },
 } satisfies EvoluSchema;
@@ -162,6 +192,16 @@ export const allCircularFieldsQuery = evolu.createQuery((db) =>
 export const allBendingCircularFieldsQuery = evolu.createQuery((db) =>
   db
     .selectFrom('bendingCircularField')
+    .selectAll()
+    .where((eb) =>
+      eb.or([eb('isDeleted', 'is', null), eb('isDeleted', '=', 0)]),
+    )
+    .orderBy('createdAt'),
+);
+
+export const allAxesQuery = evolu.createQuery((db) =>
+  db
+    .selectFrom('axis')
     .selectAll()
     .where((eb) =>
       eb.or([eb('isDeleted', 'is', null), eb('isDeleted', '=', 0)]),

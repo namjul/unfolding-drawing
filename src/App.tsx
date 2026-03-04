@@ -22,12 +22,14 @@ import {
   getRelationshipSegments,
 } from './lib/drawingRelations';
 import {
+  allAxesQuery,
   allBendingCircularFieldsQuery,
   allCircularFieldsQuery,
   allLineSegmentEndsQuery,
   allLineSegmentsQuery,
   allPlacesQuery,
   allTransformationsQuery,
+  type AxisId,
   type BendingCircularFieldId,
   type CircularFieldId,
   type LineSegmentEndId,
@@ -37,10 +39,17 @@ import {
 } from './lib/evolu-db';
 import { lineSegmentEndDisplayName } from './lib/lineSegmentEndName';
 import {
+  axisSegmentInViewport,
+  getAxisWorldGeometry,
+  projectPointOntoAxis,
+  type ViewportCanvas,
+} from './lib/axisGeometry';
+import {
   distanceFromPointToSegment,
   type LineSegmentWithPositions,
 } from './lib/lineSegmentHit';
 import { recordTransformation } from './lib/recordTransformation';
+import { chooseParentForSplitPlace } from './lib/splitLineHierarchy';
 import {
   availableTransforms as getAvailableTransforms,
   getSelectionType,
@@ -67,14 +76,26 @@ type Mode = 'default' | 'pan';
 const PLACE_RADIUS = 8;
 const CROSSHAIR_SIZE = 10;
 
+/** Sentinel id for the draggable preview place during "Split line segment". */
+const PENDING_SPLIT_PLACE = '__pending_split_place__' as PlaceId;
+/** Sentinel id for the draggable preview place during "Add place on axis". */
+const PENDING_AXIS_PLACE = '__pending_axis_place__' as PlaceId;
+
 const App: Component = () => {
   const evolu = useEvolu();
-  const placesRows = useQuery(allPlacesQuery);
-  const transformationsRows = useQuery(allTransformationsQuery);
-  const lineSegmentEndsRows = useQuery(allLineSegmentEndsQuery);
-  const lineSegmentsRows = useQuery(allLineSegmentsQuery);
-  const circularFieldsRows = useQuery(allCircularFieldsQuery);
-  const bendingCircularFieldsRows = useQuery(allBendingCircularFieldsQuery);
+  const { rows: placesRows, refresh: refreshPlaces } =
+    useQuery(allPlacesQuery);
+  const { rows: transformationsRows, refresh: refreshTransformations } =
+    useQuery(allTransformationsQuery);
+  const { rows: lineSegmentEndsRows, refresh: refreshLineSegmentEnds } =
+    useQuery(allLineSegmentEndsQuery);
+  const { rows: lineSegmentsRows, refresh: refreshLineSegments } =
+    useQuery(allLineSegmentsQuery);
+  const { rows: circularFieldsRows } = useQuery(allCircularFieldsQuery);
+  const { rows: bendingCircularFieldsRows } = useQuery(
+    allBendingCircularFieldsQuery,
+  );
+  const { rows: axesRows } = useQuery(allAxesQuery);
   let svg!: SVGSVGElement;
 
   const [scale, setScale] = createSignal(1);
@@ -95,6 +116,7 @@ const App: Component = () => {
     createSignal<CircularFieldId | null>(null);
   const [selectedBendingCircularFieldId, setSelectedBendingCircularFieldId] =
     createSignal<BendingCircularFieldId | null>(null);
+  const [selectedAxisId, setSelectedAxisId] = createSignal<AxisId | null>(null);
   const [transformChoice, setTransformChoice] =
     createSignal<TransformChoice>(null);
   const [hasDrawingPaneSelected, setHasDrawingPaneSelected] =
@@ -123,6 +145,7 @@ const App: Component = () => {
       selectedLineSegmentId(),
       selectedCircularFieldId(),
       selectedBendingCircularFieldId(),
+      selectedAxisId(),
     );
     const list = getAvailableTransforms(selectionType);
     if (selectionType !== 'circularField') return list;
@@ -133,6 +156,21 @@ const App: Component = () => {
   });
 
   const [bendAtEndsDirty, setBendAtEndsDirty] = createSignal(false);
+  const [pendingBendAtEndsAdded, setPendingBendAtEndsAdded] = createSignal<
+    Array<{
+      id: BendingCircularFieldId;
+      placeId: PlaceId;
+      lineSegmentId: LineSegmentId;
+      radius: number;
+    }>
+  >([]);
+  const [pendingBendAtEndsDeleted, setPendingBendAtEndsDeleted] = createSignal<
+    Array<{
+      id: BendingCircularFieldId;
+      placeId: PlaceId;
+      lineSegmentId: LineSegmentId;
+    }>
+  >([]);
 
   const bendAtEndsState = createMemo(() => {
     const segId = selectedLineSegmentId();
@@ -180,35 +218,73 @@ const App: Component = () => {
       hasBendAtB: !!bendAtB,
       onToggleBendAtA: () => {
         if (bendAtA) {
+          setPendingBendAtEndsDeleted((prev) => [
+            ...prev,
+            {
+              id: bendAtA.id,
+              placeId: endA.placeId,
+              lineSegmentId: segId,
+            },
+          ]);
           evolu.update('bendingCircularField', {
             id: bendAtA.id,
             isDeleted: true,
           });
         } else {
           const { offsetX, offsetY } = offsetForEndA();
-          evolu.insert('bendingCircularField', {
+          const res = evolu.insert('bendingCircularField', {
             lineSegmentEndId: endAId,
             radius,
             offsetX,
             offsetY,
           });
+          if (res.ok) {
+            setPendingBendAtEndsAdded((prev) => [
+              ...prev,
+              {
+                id: res.value.id,
+                placeId: endA.placeId,
+                lineSegmentId: segId,
+                radius,
+              },
+            ]);
+          }
         }
         setBendAtEndsDirty(true);
       },
       onToggleBendAtB: () => {
         if (bendAtB) {
+          setPendingBendAtEndsDeleted((prev) => [
+            ...prev,
+            {
+              id: bendAtB.id,
+              placeId: endB.placeId,
+              lineSegmentId: segId,
+            },
+          ]);
           evolu.update('bendingCircularField', {
             id: bendAtB.id,
             isDeleted: true,
           });
         } else {
           const { offsetX, offsetY } = offsetForEndB();
-          evolu.insert('bendingCircularField', {
+          const res = evolu.insert('bendingCircularField', {
             lineSegmentEndId: endBId,
             radius,
             offsetX,
             offsetY,
           });
+          if (res.ok) {
+            setPendingBendAtEndsAdded((prev) => [
+              ...prev,
+              {
+                id: res.value.id,
+                placeId: endB.placeId,
+                lineSegmentId: segId,
+                radius,
+              },
+            ]);
+          }
         }
         setBendAtEndsDirty(true);
       },
@@ -271,11 +347,47 @@ const App: Component = () => {
     setPendingDeleteBendingCircularFieldId,
   ] = createSignal<BendingCircularFieldId | null>(null);
 
+  type PendingSplitLine = {
+    segmentId: LineSegmentId;
+    placeAId: PlaceId;
+    placeBId: PlaceId;
+    endAId: LineSegmentEndId;
+    endBId: LineSegmentEndId;
+    parentPlaceId: PlaceId;
+    previewX: number;
+    previewY: number;
+  };
+  const [pendingSplitLine, setPendingSplitLine] =
+    createSignal<PendingSplitLine | null>(null);
+
+  const [pendingAddAxis, setPendingAddAxis] = createSignal<{
+    placeId: PlaceId;
+    angle: number;
+  } | null>(null);
+  const [pendingModifyAxis, setPendingModifyAxis] = createSignal<{
+    axisId: AxisId;
+    placeId: PlaceId;
+    angle: number;
+  } | null>(null);
+  const [pendingDeleteAxisId, setPendingDeleteAxisId] =
+    createSignal<AxisId | null>(null);
+  const [pendingAddPlaceOnAxis, setPendingAddPlaceOnAxis] = createSignal<{
+    axisId: AxisId;
+    distanceAlongAxis: number;
+  } | null>(null);
+  const [draggingAxisAngle, setDraggingAxisAngle] = createSignal(false);
+  const [draggingPlaceOnAxis, setDraggingPlaceOnAxis] =
+    createSignal<AxisId | null>(null);
+
   const places = () => placesRows();
   const lineSegmentEnds = () => lineSegmentEndsRows();
   const lineSegments = () => lineSegmentsRows();
   const circularFields = () => circularFieldsRows();
   const bendingCircularFields = () => bendingCircularFieldsRows();
+  const axes = () =>
+    axesRows().filter(
+      (a): a is typeof a & { placeId: PlaceId } => a.placeId != null,
+    );
 
   createEffect(() => {
     const isEmpty =
@@ -287,6 +399,7 @@ const App: Component = () => {
         setHasDrawingPaneSelected(true);
         setSelectedPlaceId(null);
         setSelectedLineSegmentId(null);
+        setSelectedAxisId(null);
         setGuideStep('transform');
       });
     }
@@ -323,6 +436,8 @@ const App: Component = () => {
   type PlaceLike = {
     id: PlaceId;
     parentId: PlaceId | null;
+    parentAxisId?: AxisId | null;
+    distanceAlongAxis?: number | null;
     x: number | null;
     y: number | null;
     angle?: number | null;
@@ -347,7 +462,21 @@ const App: Component = () => {
     if (moveOverride && place.id === moveOverride.placeId) {
       const localAngle = place.angle ?? 0;
       let worldAngle = localAngle;
-      if (place.parentId !== null) {
+      if (place.parentAxisId != null) {
+        const axis = axes().find((a) => a.id === place.parentAxisId);
+        const parent = axis
+          ? placesList.find((p) => p.id === axis.placeId)
+          : null;
+        if (parent) {
+          const parentRes = getAbsolutePosition(
+            parent,
+            placesList,
+            moveOverride,
+            angleOverride,
+          );
+          worldAngle = parentRes.worldAngle + (axis ? Number(axis.angle) : 0);
+        }
+      } else if (place.parentId !== null) {
         const parent = placesList.find((p) => p.id === place.parentId);
         if (parent) {
           const parentRes = getAbsolutePosition(
@@ -360,6 +489,27 @@ const App: Component = () => {
         }
       }
       return { x: moveOverride.x, y: moveOverride.y, worldAngle };
+    }
+    if (place.parentAxisId != null) {
+      const axis = axes().find((a) => a.id === place.parentAxisId);
+      const parent = axis
+        ? placesList.find((p) => p.id === axis.placeId)
+        : null;
+      if (axis && parent) {
+        const parentRes = getAbsolutePosition(
+          parent,
+          placesList,
+          moveOverride,
+          angleOverride,
+        );
+        const worldAngle = parentRes.worldAngle + Number(axis.angle);
+        const d = place.distanceAlongAxis ?? 0;
+        return {
+          x: parentRes.x + d * Math.cos(worldAngle),
+          y: parentRes.y + d * Math.sin(worldAngle),
+          worldAngle,
+        };
+      }
     }
     if (place.parentId === null) {
       const worldAngle =
@@ -412,10 +562,70 @@ const App: Component = () => {
         ? { placeId: pm.placeId, x: pm.x, y: pm.y }
         : null;
     const angleOverride = pr ? { placeId: pr.placeId, angle: pr.angle } : null;
-    return pl.map((p) => {
+    const result = pl.map((p) => {
       const abs = getAbsolutePosition(p, pl, moveOverride, angleOverride);
       return { ...p, absX: abs.x, absY: abs.y, absWorldAngle: abs.worldAngle };
     });
+    const ps = pendingSplitLine();
+    if (ps) {
+      const previewX =
+        pm?.placeId === PENDING_SPLIT_PLACE ? pm.x : ps.previewX;
+      const previewY =
+        pm?.placeId === PENDING_SPLIT_PLACE ? pm.y : ps.previewY;
+      result.push({
+        id: PENDING_SPLIT_PLACE,
+        parentId: null,
+        x: 0,
+        y: 0,
+        angle: null,
+        name: null,
+        isScaffolding: 1,
+        absX: previewX,
+        absY: previewY,
+        absWorldAngle: 0,
+      } as (typeof result)[number]);
+    }
+    const paPlace = pendingAddPlaceOnAxis();
+    if (paPlace) {
+      const axis = axes().find((a) => a.id === paPlace.axisId);
+      if (axis) {
+        const parentPlace = pl.find((p) => p.id === axis.placeId);
+        if (parentPlace) {
+          const parentAbs = getAbsolutePosition(
+            parentPlace,
+            pl,
+            moveOverride,
+            angleOverride,
+          );
+          const worldAngle =
+            parentAbs.worldAngle + Number(axis.angle);
+          const px =
+            parentAbs.x +
+            paPlace.distanceAlongAxis * Math.cos(worldAngle);
+          const py =
+            parentAbs.y +
+            paPlace.distanceAlongAxis * Math.sin(worldAngle);
+          const previewPx =
+            pm?.placeId === PENDING_AXIS_PLACE ? pm.x : px;
+          const previewPy =
+            pm?.placeId === PENDING_AXIS_PLACE ? pm.y : py;
+          result.push({
+            id: PENDING_AXIS_PLACE,
+            parentId: null,
+            parentAxisId: null,
+            x: 0,
+            y: 0,
+            angle: null,
+            name: null,
+            isScaffolding: 1,
+            absX: previewPx,
+            absY: previewPy,
+            absWorldAngle: worldAngle,
+          } as (typeof result)[number]);
+        }
+      }
+    }
+    return result;
   };
 
   const relatedPlaceIds = createMemo(() =>
@@ -450,6 +660,7 @@ const App: Component = () => {
     const segs = lineSegments();
     const pm = pendingMove();
     const pr = pendingRotate();
+    const ps = pendingSplitLine();
     const moveOverride =
       pm && pm.placeId !== 'pending'
         ? { placeId: pm.placeId, x: pm.x, y: pm.y }
@@ -461,7 +672,8 @@ const App: Component = () => {
       const abs = getAbsolutePosition(place, pl, moveOverride, angleOverride);
       return { x: abs.x, y: abs.y };
     };
-    return segs
+    let list = segs
+      .filter((seg) => !ps || seg.id !== ps.segmentId)
       .map((seg) => {
         const endA = ends.find((e) => e.id === seg.endAId);
         const endB = ends.find((e) => e.id === seg.endBId);
@@ -481,6 +693,43 @@ const App: Component = () => {
         };
       })
       .filter((s): s is LineSegmentWithPositions => s != null);
+    if (ps) {
+      const previewX =
+        pm?.placeId === PENDING_SPLIT_PLACE ? pm.x : ps.previewX;
+      const previewY =
+        pm?.placeId === PENDING_SPLIT_PLACE ? pm.y : ps.previewY;
+      const posA = getPlaceAbs(ps.placeAId);
+      const posB = getPlaceAbs(ps.placeBId);
+      const origSeg = segs.find((s) => s.id === ps.segmentId);
+      const isScaff =
+        origSeg?.isScaffolding != null
+          ? Number(origSeg.isScaffolding)
+          : null;
+      if (posA && posB) {
+        const synIdA = 'split-preview-a' as LineSegmentId;
+        const synIdB = 'split-preview-b' as LineSegmentId;
+        list = [
+          ...list,
+          {
+            id: synIdA,
+            x1: posA.x,
+            y1: posA.y,
+            x2: previewX,
+            y2: previewY,
+            isScaffolding: isScaff,
+          },
+          {
+            id: synIdB,
+            x1: previewX,
+            y1: previewY,
+            x2: posB.x,
+            y2: posB.y,
+            isScaffolding: isScaff,
+          },
+        ];
+      }
+    }
+    return list;
   };
 
   const findLineSegmentAtCursor = (
@@ -632,6 +881,48 @@ const App: Component = () => {
     return Math.hypot(px - handleX, py - handleY) <= threshold;
   };
 
+  const AXIS_HIT_THRESHOLD = 16;
+  const findAxisAt = (cx: number, cy: number): AxisId | null => {
+    const placesAbs = placesWithAbsolutePositions();
+    const rect = svg?.getBoundingClientRect?.();
+    if (!rect) return null;
+    const viewport: ViewportCanvas = {
+      left: -translateX() / scale(),
+      top: -translateY() / scale(),
+      width: rect.width / scale(),
+      height: rect.height / scale(),
+    };
+    let best: { id: AxisId; dist: number } | null = null;
+    for (const axis of axes()) {
+      const geom = getAxisWorldGeometry(
+        {
+          id: axis.id,
+          placeId: axis.placeId,
+          angle: Number(axis.angle),
+        },
+        placesAbs,
+      );
+      const seg = axisSegmentInViewport(
+        geom.originX,
+        geom.originY,
+        geom.worldAngle,
+        viewport,
+      );
+      const dist = distanceFromPointToSegment(
+        cx,
+        cy,
+        seg.x1,
+        seg.y1,
+        seg.x2,
+        seg.y2,
+      );
+      if (dist <= AXIS_HIT_THRESHOLD) {
+        if (!best || dist < best.dist) best = { id: axis.id, dist };
+      }
+    }
+    return best?.id ?? null;
+  };
+
   const ORIENTATION_AXIS_LENGTH = 120;
   const isPointNearAxis = (
     px: number,
@@ -672,6 +963,7 @@ const App: Component = () => {
         setSelectedLineSegmentId(null);
         setSelectedCircularFieldId(null);
         setSelectedBendingCircularFieldId(null);
+        setSelectedAxisId(null);
         setHasDrawingPaneSelected(false);
       } else {
         const lineHit = findLineSegmentAtCursor(cx, cy);
@@ -680,6 +972,7 @@ const App: Component = () => {
           setSelectedPlaceId(null);
           setSelectedCircularFieldId(null);
           setSelectedBendingCircularFieldId(null);
+          setSelectedAxisId(null);
           setHasDrawingPaneSelected(false);
         } else {
           const cfHit = findCircularFieldAt(cx, cy);
@@ -688,6 +981,7 @@ const App: Component = () => {
             setSelectedPlaceId(null);
             setSelectedLineSegmentId(null);
             setSelectedBendingCircularFieldId(null);
+            setSelectedAxisId(null);
             setHasDrawingPaneSelected(false);
           } else {
             const bfHit = findBendingCircularFieldAt(cx, cy);
@@ -696,13 +990,25 @@ const App: Component = () => {
               setSelectedPlaceId(null);
               setSelectedLineSegmentId(null);
               setSelectedCircularFieldId(null);
+              setSelectedAxisId(null);
               setHasDrawingPaneSelected(false);
             } else {
-              setSelectedPlaceId(null);
-              setSelectedLineSegmentId(null);
-              setSelectedCircularFieldId(null);
-              setSelectedBendingCircularFieldId(null);
-              setHasDrawingPaneSelected(true);
+              const axisHit = findAxisAt(cx, cy);
+              if (axisHit) {
+                setSelectedAxisId(axisHit);
+                setSelectedPlaceId(null);
+                setSelectedLineSegmentId(null);
+                setSelectedCircularFieldId(null);
+                setSelectedBendingCircularFieldId(null);
+                setHasDrawingPaneSelected(false);
+              } else {
+                setSelectedPlaceId(null);
+                setSelectedLineSegmentId(null);
+                setSelectedCircularFieldId(null);
+                setSelectedBendingCircularFieldId(null);
+                setSelectedAxisId(null);
+                setHasDrawingPaneSelected(true);
+              }
             }
           }
         }
@@ -809,6 +1115,83 @@ const App: Component = () => {
       }
     }
 
+    if (
+      gs === 'execute' &&
+      tc === 'splitLine' &&
+      pendingSplitLine() &&
+      hit?.id === PENDING_SPLIT_PLACE
+    ) {
+      setPendingMove({
+        placeId: PENDING_SPLIT_PLACE,
+        x: hit.absX,
+        y: hit.absY,
+      });
+    }
+
+    const paPlace = pendingAddPlaceOnAxis();
+    if (
+      gs === 'execute' &&
+      tc === 'addPlaceOnAxis' &&
+      paPlace &&
+      hit?.id === PENDING_AXIS_PLACE
+    ) {
+      setDraggingPlaceOnAxis(paPlace.axisId);
+      return;
+    }
+
+    const pa = pendingAddAxis();
+    const pmod = pendingModifyAxis();
+    if (
+      gs === 'execute' &&
+      (tc === 'addAxis' || tc === 'modifyAxis') &&
+      (pa || pmod) &&
+      !draggingAxisAngle()
+    ) {
+      const placesAbs = placesWithAbsolutePositions();
+      const axisInfo = pa
+        ? { placeId: pa.placeId, angle: pa.angle }
+        : pmod
+          ? { placeId: pmod.placeId, angle: pmod.angle }
+          : null;
+      if (axisInfo) {
+        const geom = getAxisWorldGeometry(
+          {
+            id: '' as AxisId,
+            placeId: axisInfo.placeId,
+            angle: axisInfo.angle,
+          },
+          placesAbs,
+        );
+        const rect = svg?.getBoundingClientRect?.();
+        if (rect) {
+          const viewport: ViewportCanvas = {
+            left: -translateX() / scale(),
+            top: -translateY() / scale(),
+            width: rect.width / scale(),
+            height: rect.height / scale(),
+          };
+          const seg = axisSegmentInViewport(
+            geom.originX,
+            geom.originY,
+            geom.worldAngle,
+            viewport,
+          );
+          const dist = distanceFromPointToSegment(
+            cx,
+            cy,
+            seg.x1,
+            seg.y1,
+            seg.x2,
+            seg.y2,
+          );
+          if (dist < 24) {
+            setDraggingAxisAngle(true);
+            return;
+          }
+        }
+      }
+    }
+
     if (gs === 'execute' && tc === 'moveCircularField') {
       const cfId = selectedCircularFieldId();
       if (cfId) {
@@ -826,14 +1209,37 @@ const App: Component = () => {
       }
     }
 
-    if (gs === 'execute' && tc === 'moveBendingCircularField') {
-      const bfId = selectedBendingCircularFieldId();
-      if (bfId) {
-        const bf = bendingFieldsWithPositions().find((b) => b.id === bfId);
-        if (bf) {
-          const dist = Math.hypot(cx - bf.centerX, cy - bf.centerY);
-          if (dist <= bf.radius + BENDING_FIELD_HIT_THRESHOLD) {
-            setPendingMoveBendingCircularField(bfId);
+    if (gs === 'execute' && tc === 'bendAtEnds') {
+      const segId = selectedLineSegmentId();
+      if (segId) {
+        const seg = lineSegments().find((s) => s.id === segId);
+        if (seg) {
+          const segmentBending = bendingFieldsWithPositions().filter(
+            (bf) =>
+              bf.lineSegmentEndId === seg.endAId ||
+              bf.lineSegmentEndId === seg.endBId,
+          );
+          for (const bf of segmentBending) {
+            if (
+              isPointNearBendingRadiusHandle(
+                cx,
+                cy,
+                bf.centerX,
+                bf.centerY,
+                bf.endX,
+                bf.endY,
+              )
+            ) {
+              setDraggingBendingCircularFieldRadius(bf.id);
+              return;
+            }
+          }
+          for (const bf of segmentBending) {
+            const dist = Math.hypot(cx - bf.centerX, cy - bf.centerY);
+            if (dist <= bf.radius + BENDING_FIELD_HIT_THRESHOLD) {
+              setPendingMoveBendingCircularField(bf.id);
+              return;
+            }
           }
         }
       }
@@ -843,19 +1249,24 @@ const App: Component = () => {
       const bfId = selectedBendingCircularFieldId();
       if (bfId) {
         const bf = bendingFieldsWithPositions().find((b) => b.id === bfId);
-        if (
-          bf &&
-          isPointNearBendingRadiusHandle(
-            cx,
-            cy,
-            bf.centerX,
-            bf.centerY,
-            bf.endX,
-            bf.endY,
-          )
-        ) {
-          setDraggingBendingCircularFieldRadius(bfId);
-          return;
+        if (bf) {
+          if (
+            isPointNearBendingRadiusHandle(
+              cx,
+              cy,
+              bf.centerX,
+              bf.centerY,
+              bf.endX,
+              bf.endY,
+            )
+          ) {
+            setDraggingBendingCircularFieldRadius(bfId);
+            return;
+          }
+          const dist = Math.hypot(cx - bf.centerX, cy - bf.centerY);
+          if (dist <= bf.radius + BENDING_FIELD_HIT_THRESHOLD) {
+            setPendingMoveBendingCircularField(bfId);
+          }
         }
       }
     }
@@ -1014,18 +1425,118 @@ const App: Component = () => {
     if (pal && guideStep() === 'execute' && mode() === 'default') {
       setPendingAddLine({ ...pal, cursorX: cx, cursorY: cy });
     }
+    const dragPlaceOnAxis = draggingPlaceOnAxis();
+    if (dragPlaceOnAxis && guideStep() === 'execute' && mode() === 'default') {
+      const axis = axes().find((a) => a.id === dragPlaceOnAxis);
+      if (axis) {
+        const parentPlace = places().find((p) => p.id === axis.placeId);
+        if (parentPlace) {
+          const placesAbs = placesWithAbsolutePositions();
+          const geom = getAxisWorldGeometry(
+            { id: axis.id, placeId: axis.placeId, angle: Number(axis.angle) },
+            placesAbs,
+          );
+          const d = projectPointOntoAxis(
+            cx,
+            cy,
+            geom.originX,
+            geom.originY,
+            geom.worldAngle,
+          );
+          setPendingAddPlaceOnAxis({ axisId: dragPlaceOnAxis, distanceAlongAxis: d });
+        }
+      }
+    }
+
+    if (draggingAxisAngle() && guideStep() === 'execute' && mode() === 'default') {
+      const addAx = pendingAddAxis();
+      const modAx = pendingModifyAxis();
+      const axisInfo = addAx ?? modAx;
+      if (axisInfo) {
+        const parentPlace = places().find(
+          (p) => p.id === (addAx ? addAx.placeId : modAx!.placeId),
+        );
+        if (parentPlace) {
+          const placesAbs = placesWithAbsolutePositions();
+          const parentAbs = placesAbs.find(
+            (p) => p.id === parentPlace.id,
+          );
+          if (parentAbs) {
+            const worldAngle = Math.atan2(
+              cy - parentAbs.absY,
+              cx - parentAbs.absX,
+            );
+            const axisAngle = worldAngle - parentAbs.absWorldAngle;
+            if (addAx) {
+              setPendingAddAxis({ placeId: addAx.placeId, angle: axisAngle });
+            } else if (modAx) {
+              setPendingModifyAxis({
+                axisId: modAx.axisId,
+                placeId: modAx.placeId,
+                angle: axisAngle,
+              });
+            }
+          }
+        }
+      }
+    }
+
     if (pm && guideStep() === 'execute' && mode() === 'default') {
       if (pm.placeId === 'pending' && pa) {
         setPendingAdd({ ...pa, x: cx, y: cy });
         setPendingMove({ placeId: 'pending', x: cx, y: cy });
       } else if (
-        transformChoice() === 'move' ||
+        transformChoice() === 'move' &&
+        pm.placeId !== 'pending' &&
+        pm.placeId !== PENDING_SPLIT_PLACE
+      ) {
+        const place = places().find((p) => p.id === pm.placeId) as
+          | (PlaceLike & { parentAxisId?: AxisId | null })
+          | undefined;
+        if (place?.parentAxisId != null) {
+          const axis = axes().find((a) => a.id === place.parentAxisId);
+          if (axis) {
+            const parentPlace = places().find((p) => p.id === axis.placeId);
+            if (parentPlace) {
+              const placesAbs = placesWithAbsolutePositions();
+              const geom = getAxisWorldGeometry(
+                {
+                  id: axis.id,
+                  placeId: axis.placeId,
+                  angle: Number(axis.angle),
+                },
+                placesAbs,
+              );
+              const d = projectPointOntoAxis(
+                cx,
+                cy,
+                geom.originX,
+                geom.originY,
+                geom.worldAngle,
+              );
+              const projX =
+                geom.originX + d * Math.cos(geom.worldAngle);
+              const projY =
+                geom.originY + d * Math.sin(geom.worldAngle);
+              setPendingMove({ placeId: pm.placeId, x: projX, y: projY });
+            }
+          }
+        } else {
+          setPendingMove({ placeId: pm.placeId, x: cx, y: cy });
+        }
+      } else if (
         transformChoice() === 'moveCircularField' ||
         transformChoice() === 'addLine' ||
+        transformChoice() === 'splitLine' ||
         (transformChoice() === 'addCircularField' &&
           pac?.stage === 'editing' &&
           pac.isNewPlace &&
           pm.placeId === pac.placeId)
+      ) {
+        setPendingMove({ placeId: pm.placeId, x: cx, y: cy });
+      } else if (
+        transformChoice() === 'move' &&
+        (pm.placeId === PENDING_SPLIT_PLACE || pm.placeId === 'pending')
       ) {
         setPendingMove({ placeId: pm.placeId, x: cx, y: cy });
       }
@@ -1115,6 +1626,8 @@ const App: Component = () => {
     if (draggingCircularFieldRadius() != null) {
       setDraggingCircularFieldRadius(null);
     }
+    setDraggingAxisAngle(false);
+    setDraggingPlaceOnAxis(null);
     // Bending circle move/radius state is cleared in goToSelectStep on keep/discard
     // so hasChanges stays true after drag ends and keep/discard remain enabled.
   };
@@ -1174,10 +1687,16 @@ const App: Component = () => {
       setPendingMoveBendingCircularField(null);
       setDraggingBendingCircularFieldRadius(null);
       setPendingDeleteBendingCircularFieldId(null);
+      setPendingSplitLine(null);
+      setPendingAddAxis(null);
+      setPendingModifyAxis(null);
+      setPendingDeleteAxisId(null);
+      setPendingAddPlaceOnAxis(null);
       setSelectedPlaceId(null);
       setSelectedLineSegmentId(null);
       setSelectedCircularFieldId(null);
       setSelectedBendingCircularFieldId(null);
+      setSelectedAxisId(null);
       setHasDrawingPaneSelected(false);
     });
   };
@@ -1253,6 +1772,81 @@ const App: Component = () => {
         }
       }
     }
+    if (choice === 'addAxis') {
+      const placeId = selectedPlaceId();
+      if (placeId) {
+        setPendingAddAxis({ placeId, angle: 0 });
+      }
+    }
+    if (choice === 'modifyAxis') {
+      const axisId = selectedAxisId();
+      if (axisId) {
+        const axis = axes().find((a) => a.id === axisId);
+        if (axis) {
+          setPendingModifyAxis({
+            axisId,
+            placeId: axis.placeId,
+            angle: Number(axis.angle),
+          });
+        }
+      }
+    }
+    if (choice === 'deleteAxis' && selectedAxisId()) {
+      setPendingDeleteAxisId(selectedAxisId()!);
+    }
+    if (choice === 'addPlaceOnAxis') {
+      const axisId = selectedAxisId();
+      if (axisId) {
+        setPendingAddPlaceOnAxis({ axisId, distanceAlongAxis: 0 });
+      }
+    }
+    if (choice === 'splitLine') {
+      const segId = selectedLineSegmentId();
+      if (segId) {
+        const seg = lineSegments().find((s) => s.id === segId);
+        const ends = lineSegmentEnds();
+        if (
+          seg &&
+          seg.endAId != null &&
+          seg.endBId != null
+        ) {
+          const endA = ends.find((e) => e.id === seg.endAId);
+          const endB = ends.find((e) => e.id === seg.endBId);
+          if (endA?.placeId != null && endB?.placeId != null) {
+            const placeAId = endA.placeId;
+            const placeBId = endB.placeId;
+            const placesWithAbs = placesWithAbsolutePositions().filter(
+              (p) => p.id !== PENDING_SPLIT_PLACE,
+            );
+            const parentPlaceId = chooseParentForSplitPlace(
+              placeAId,
+              placeBId,
+              places(),
+              placesWithAbs,
+            );
+            const segPos = lineSegmentsWithPositions().find(
+              (s) => s.id === segId,
+            );
+            const previewX = segPos
+              ? (segPos.x1 + segPos.x2) / 2
+              : 0;
+            const previewY = segPos
+              ? (segPos.y1 + segPos.y2) / 2
+              : 0;
+            setPendingSplitLine({
+              segmentId: segId,
+              placeAId,
+              placeBId,
+              endAId: seg.endAId as LineSegmentEndId,
+              endBId: seg.endBId as LineSegmentEndId,
+              parentPlaceId,
+              previewX,
+              previewY,
+            });
+          }
+        }
+      }
+    }
     setGuideStep('execute');
   };
 
@@ -1273,10 +1867,18 @@ const App: Component = () => {
     setDraggingBendingCircularFieldRadius(null);
     setPendingDeleteBendingCircularFieldId(null);
     setBendAtEndsDirty(false);
+    setPendingBendAtEndsAdded([]);
+    setPendingBendAtEndsDeleted([]);
+    setPendingSplitLine(null);
+    setPendingAddAxis(null);
+    setPendingModifyAxis(null);
+    setPendingDeleteAxisId(null);
+    setPendingAddPlaceOnAxis(null);
     setSelectedPlaceId(null);
     setSelectedLineSegmentId(null);
     setSelectedCircularFieldId(null);
     setSelectedBendingCircularFieldId(null);
+    setSelectedAxisId(null);
     setHasDrawingPaneSelected(false);
   };
 
@@ -1285,6 +1887,7 @@ const App: Component = () => {
     setSelectedLineSegmentId(null);
     setSelectedCircularFieldId(null);
     setSelectedBendingCircularFieldId(null);
+    setSelectedAxisId(null);
     setHasDrawingPaneSelected(false);
     setTransformChoice(null);
     setGuideStep('select');
@@ -1355,40 +1958,74 @@ const App: Component = () => {
         move.placeId === 'pending' ? insertedPlaceId : move.placeId;
       if (placeId) {
         const place = placesList.find((p) => p.id === placeId);
-        let x = move.x;
-        let y = move.y;
-        const parentIdForMove =
-          place?.parentId ??
-          (add && move.placeId === 'pending' ? add.parentId : null);
-        if (parentIdForMove) {
-          const parent = placesList.find((p) => p.id === parentIdForMove);
-          if (parent) {
-            const parentRes = getAbsolutePosition(parent, placesList);
-            const worldOffset = {
-              x: move.x - parentRes.x,
-              y: move.y - parentRes.y,
-            };
-            const local = rotateBy(
-              -parentRes.worldAngle,
-              worldOffset.x,
-              worldOffset.y,
-            );
-            x = local.x;
-            y = local.y;
+        const placeOnAxis =
+          place &&
+          (place as PlaceLike).parentAxisId != null &&
+          (place as PlaceLike).parentAxisId;
+        if (placeOnAxis) {
+          const axis = axes().find((a) => a.id === placeOnAxis);
+          if (axis) {
+            const parentPlace = placesList.find((p) => p.id === axis.placeId);
+            if (parentPlace) {
+              const parentRes = getAbsolutePosition(parentPlace, placesList);
+              const worldAngle =
+                parentRes.worldAngle + Number(axis.angle);
+              const d = projectPointOntoAxis(
+                move.x,
+                move.y,
+                parentRes.x,
+                parentRes.y,
+                worldAngle,
+              );
+              evolu.update('place', {
+                id: placeId,
+                distanceAlongAxis: d,
+              });
+              recordTransformation({
+                kind: 'move',
+                placeId,
+                parentId: null,
+                x: move.x,
+                y: move.y,
+              });
+            }
           }
+        } else {
+          let x = move.x;
+          let y = move.y;
+          const parentIdForMove =
+            place?.parentId ??
+            (add && move.placeId === 'pending' ? add.parentId : null);
+          if (parentIdForMove) {
+            const parent = placesList.find((p) => p.id === parentIdForMove);
+            if (parent) {
+              const parentRes = getAbsolutePosition(parent, placesList);
+              const worldOffset = {
+                x: move.x - parentRes.x,
+                y: move.y - parentRes.y,
+              };
+              const local = rotateBy(
+                -parentRes.worldAngle,
+                worldOffset.x,
+                worldOffset.y,
+              );
+              x = local.x;
+              y = local.y;
+            }
+          }
+          evolu.update('place', {
+            id: placeId,
+            x,
+            y,
+          });
+          recordTransformation({
+            kind: 'move',
+            placeId,
+            parentId: parentIdForMove,
+            x,
+            y,
+          });
         }
-        evolu.update('place', {
-          id: placeId,
-          x,
-          y,
-        });
-        recordTransformation({
-          kind: 'move',
-          placeId,
-          parentId: parentIdForMove,
-          x,
-          y,
-        });
       }
       setPendingMove(null);
     }
@@ -1418,6 +2055,73 @@ const App: Component = () => {
       setPendingRotate(null);
     }
 
+    const addAx = pendingAddAxis();
+    if (addAx) {
+      const axisRes = evolu.insert('axis', {
+        placeId: addAx.placeId,
+        angle: addAx.angle,
+      });
+      if (axisRes.ok) {
+        recordTransformation({
+          kind: 'addAxis',
+          placeId: addAx.placeId,
+          axisId: axisRes.value.id,
+          angle: addAx.angle,
+        });
+      }
+      setPendingAddAxis(null);
+    }
+
+    const modAx = pendingModifyAxis();
+    if (modAx) {
+      evolu.update('axis', { id: modAx.axisId, angle: modAx.angle });
+      recordTransformation({
+        kind: 'modifyAxis',
+        placeId: modAx.placeId,
+        axisId: modAx.axisId,
+        angle: modAx.angle,
+      });
+      setPendingModifyAxis(null);
+    }
+
+    const delAxisId = pendingDeleteAxisId();
+    if (delAxisId) {
+      const axis = axes().find((a) => a.id === delAxisId);
+      if (axis) {
+        evolu.update('axis', { id: delAxisId, isDeleted: true });
+        recordTransformation({
+          kind: 'deleteAxis',
+          placeId: axis.placeId,
+          axisId: delAxisId,
+        });
+      }
+      setPendingDeleteAxisId(null);
+    }
+
+    const addPlaceOnAx = pendingAddPlaceOnAxis();
+    if (addPlaceOnAx) {
+      const defaultName = nextPlaceName(placesList);
+      const nameResult = String1000.from(defaultName);
+      const placeRes = evolu.insert('place', {
+        parentId: null,
+        parentAxisId: addPlaceOnAx.axisId,
+        distanceAlongAxis: addPlaceOnAx.distanceAlongAxis,
+        x: 0,
+        y: 0,
+        ...(nameResult.ok && { name: nameResult.value }),
+        isScaffolding: 1,
+      });
+      if (placeRes.ok) {
+        recordTransformation({
+          kind: 'addPlaceOnAxis',
+          placeId: placeRes.value.id,
+          axisId: addPlaceOnAx.axisId,
+          distanceAlongAxis: addPlaceOnAx.distanceAlongAxis,
+        });
+      }
+      setPendingAddPlaceOnAxis(null);
+    }
+
     const delLine = pendingDeleteLineId();
     if (delLine) {
       const seg = lineSegments().find((s) => s.id === delLine);
@@ -1438,6 +2142,128 @@ const App: Component = () => {
         evolu.update('lineSegmentEnd', { id: seg.endBId, isDeleted: true });
       }
       setPendingDeleteLineId(null);
+    }
+
+    const ps = pendingSplitLine();
+    if (ps) {
+      const move = pendingMove();
+      const worldX =
+        move?.placeId === PENDING_SPLIT_PLACE ? move.x : ps.previewX;
+      const worldY =
+        move?.placeId === PENDING_SPLIT_PLACE ? move.y : ps.previewY;
+      const parent = placesList.find((p) => p.id === ps.parentPlaceId);
+      let localX = worldX;
+      let localY = worldY;
+      if (parent) {
+        const parentRes = getAbsolutePosition(parent, placesList);
+        const localOffset = rotateBy(
+          -parentRes.worldAngle,
+          worldX - parentRes.x,
+          worldY - parentRes.y,
+        );
+        localX = localOffset.x;
+        localY = localOffset.y;
+      }
+      const placeName = nextPlaceName(placesList);
+      const placeNameResult = String1000.from(placeName);
+      const endDisplayName1 = lineSegmentEndDisplayName(
+        nextLineSegmentName(lineSegments()),
+        placeName,
+      );
+      const name1 = nextLineSegmentName(lineSegments());
+      const name2 = nextLineSegmentName(
+        lineSegments().concat([{ name: name1 }]),
+      );
+      // Task 1: insert place only so the worker applies it before task 2.
+      setTimeout(() => {
+        const placeRes = evolu.insert('place', {
+          parentId: ps.parentPlaceId,
+          x: localX,
+          y: localY,
+          ...(placeNameResult.ok && { name: placeNameResult.value }),
+          isScaffolding: 1,
+        });
+        if (!placeRes.ok) {
+          setPendingSplitLine(null);
+          setPendingMove(null);
+          goToSelectStep();
+          return;
+        }
+        const newPlaceId = placeRes.value.id;
+        // Task 2: rest of split + position update (place row now exists).
+        setTimeout(() => {
+          const endRes = evolu.insert('lineSegmentEnd', {
+            placeId: newPlaceId,
+          });
+          if (!endRes.ok) {
+            setPendingSplitLine(null);
+            setPendingMove(null);
+            goToSelectStep();
+            return;
+          }
+          const newEndCId = endRes.value.id;
+          const endNameResult = String1000.from(endDisplayName1);
+          if (endNameResult.ok) {
+            evolu.update('lineSegmentEnd', {
+              id: newEndCId,
+              name: endNameResult.value,
+            });
+          }
+          const name1Result = String1000.from(name1);
+          const seg1Res = evolu.insert('lineSegment', {
+            endAId: ps.endAId,
+            endBId: newEndCId,
+            ...(name1Result.ok && { name: name1Result.value }),
+            isScaffolding: 0,
+          });
+          if (!seg1Res.ok) {
+            setPendingSplitLine(null);
+            setPendingMove(null);
+            goToSelectStep();
+            return;
+          }
+          const name2Result = String1000.from(name2);
+          const seg2Res = evolu.insert('lineSegment', {
+            endAId: newEndCId,
+            endBId: ps.endBId,
+            ...(name2Result.ok && { name: name2Result.value }),
+            isScaffolding: 0,
+          });
+          if (!seg2Res.ok) {
+            setPendingSplitLine(null);
+            setPendingMove(null);
+            goToSelectStep();
+            return;
+          }
+          evolu.update('lineSegment', {
+            id: ps.segmentId,
+            isDeleted: true,
+          });
+          recordTransformation({
+            kind: 'splitLine',
+            placeId: newPlaceId,
+            lineSegmentId: ps.segmentId,
+            lineSegmentId2: seg1Res.value.id,
+            lineSegmentId3: seg2Res.value.id,
+          });
+          if (Number.isFinite(localX) && Number.isFinite(localY)) {
+            evolu.update('place', { id: newPlaceId, x: localX, y: localY });
+          }
+          const REFRESH_DELAY_MS = 400;
+          setTimeout(async () => {
+            await Promise.all([
+              refreshPlaces(),
+              refreshLineSegments(),
+              refreshLineSegmentEnds(),
+              refreshTransformations(),
+            ]);
+            setPendingSplitLine(null);
+            setPendingMove(null);
+            goToSelectStep();
+          }, REFRESH_DELAY_MS);
+        }, 0);
+      }, 0);
+      return;
     }
 
     const pac = pendingAddCircularField();
@@ -1493,12 +2319,86 @@ const App: Component = () => {
       setPendingDeleteCircularFieldId(null);
     }
 
+    const pmbf = pendingMoveBendingCircularField();
+    if (pmbf) {
+      const bf = bendingFieldsWithPositions().find((b) => b.id === pmbf);
+      if (bf) {
+        const end = lineSegmentEnds().find((e) => e.id === bf.lineSegmentEndId);
+        const seg = lineSegments().find(
+          (s) => s.endAId === bf.lineSegmentEndId || s.endBId === bf.lineSegmentEndId,
+        );
+        if (end?.placeId != null && seg) {
+          recordTransformation({
+            kind: 'modifyBendingCircularField',
+            placeId: end.placeId,
+            lineSegmentId: seg.id,
+            bendingCircularFieldId: pmbf,
+            radius: bf.radius,
+          });
+        }
+      }
+    }
     setPendingMoveBendingCircularField(null);
+    const draggingBf = draggingBendingCircularFieldRadius();
+    if (draggingBf) {
+      const bf = bendingFieldsWithPositions().find((b) => b.id === draggingBf);
+      if (bf) {
+        const end = lineSegmentEnds().find((e) => e.id === bf.lineSegmentEndId);
+        const seg = lineSegments().find(
+          (s) => s.endAId === bf.lineSegmentEndId || s.endBId === bf.lineSegmentEndId,
+        );
+        if (end?.placeId != null && seg) {
+          recordTransformation({
+            kind: 'modifyBendingCircularField',
+            placeId: end.placeId,
+            lineSegmentId: seg.id,
+            bendingCircularFieldId: draggingBf,
+            radius: bf.radius,
+          });
+        }
+      }
+    }
+    setDraggingBendingCircularFieldRadius(null);
     const pdbId = pendingDeleteBendingCircularFieldId();
     if (pdbId) {
+      const bf = bendingCircularFields().find((b) => b.id === pdbId);
+      if (bf?.lineSegmentEndId != null) {
+        const end = lineSegmentEnds().find((e) => e.id === bf.lineSegmentEndId);
+        const seg = lineSegments().find(
+          (s) => s.endAId === bf.lineSegmentEndId || s.endBId === bf.lineSegmentEndId,
+        );
+        if (end?.placeId != null && seg) {
+          recordTransformation({
+            kind: 'deleteBendingCircularField',
+            placeId: end.placeId,
+            lineSegmentId: seg.id,
+            bendingCircularFieldId: pdbId,
+          });
+        }
+      }
       evolu.update('bendingCircularField', { id: pdbId, isDeleted: true });
       setPendingDeleteBendingCircularFieldId(null);
     }
+
+    for (const a of pendingBendAtEndsAdded()) {
+      recordTransformation({
+        kind: 'addBendingCircularField',
+        placeId: a.placeId,
+        lineSegmentId: a.lineSegmentId,
+        bendingCircularFieldId: a.id,
+        radius: a.radius,
+      });
+    }
+    setPendingBendAtEndsAdded([]);
+    for (const d of pendingBendAtEndsDeleted()) {
+      recordTransformation({
+        kind: 'deleteBendingCircularField',
+        placeId: d.placeId,
+        lineSegmentId: d.lineSegmentId,
+        bendingCircularFieldId: d.id,
+      });
+    }
+    setPendingBendAtEndsDeleted([]);
 
     setPendingAddLine(null);
     goToSelectStep();
@@ -1519,6 +2419,16 @@ const App: Component = () => {
     setPendingModifyCircularField(null);
     setPendingDeleteCircularFieldId(null);
     setDraggingCircularFieldRadius(null);
+    setPendingSplitLine(null);
+    setPendingMove(null);
+    for (const a of pendingBendAtEndsAdded()) {
+      evolu.update('bendingCircularField', { id: a.id, isDeleted: true });
+    }
+    setPendingBendAtEndsAdded([]);
+    for (const d of pendingBendAtEndsDeleted()) {
+      evolu.update('bendingCircularField', { id: d.id, isDeleted: false });
+    }
+    setPendingBendAtEndsDeleted([]);
     goToSelectStep();
   };
 
@@ -1647,6 +2557,7 @@ const App: Component = () => {
             (tc === 'move' ||
               tc === 'moveCircularField' ||
               tc === 'addLine' ||
+              tc === 'splitLine' ||
               ((tc === 'add' || tc === 'addRelated') &&
                 pm.placeId === 'pending') ||
               (tc === 'addCircularField' &&
@@ -1659,10 +2570,16 @@ const App: Component = () => {
             (tc === 'addCircularField' || tc === 'modifyCircularField')) ||
           (pendingMoveBendingCircularField() != null &&
             gs === 'execute' &&
-            tc === 'moveBendingCircularField') ||
+            (tc === 'modifyBendingCircularField' || tc === 'bendAtEnds')) ||
           (draggingBendingCircularFieldRadius() != null &&
             gs === 'execute' &&
-            tc === 'modifyBendingCircularField');
+            (tc === 'modifyBendingCircularField' || tc === 'bendAtEnds')) ||
+          (draggingAxisAngle() &&
+            gs === 'execute' &&
+            (tc === 'addAxis' || tc === 'modifyAxis')) ||
+          (draggingPlaceOnAxis() != null &&
+            gs === 'execute' &&
+            tc === 'addPlaceOnAxis');
         if (shouldDrag) {
           isMoveDrag = true;
           onMove((moveEv) => {
@@ -1725,6 +2642,7 @@ const App: Component = () => {
           selectedLineSegmentId={selectedLineSegmentId()}
           selectedCircularFieldId={selectedCircularFieldId()}
           selectedBendingCircularFieldId={selectedBendingCircularFieldId()}
+          selectedAxisId={selectedAxisId()}
           transformChoice={transformChoice()}
           onStepObserve={resetGuide}
           onStepSelect={() => setGuideStep('select')}
@@ -1737,6 +2655,7 @@ const App: Component = () => {
                 setSelectedLineSegmentId(null);
                 setSelectedCircularFieldId(null);
                 setSelectedBendingCircularFieldId(null);
+                setSelectedAxisId(null);
                 setHasDrawingPaneSelected(false);
               });
             } else {
@@ -1750,6 +2669,7 @@ const App: Component = () => {
             setSelectedLineSegmentId(null);
             setSelectedCircularFieldId(null);
             setSelectedBendingCircularFieldId(null);
+            setSelectedAxisId(null);
             setGuideStep('transform');
           }}
           onTransformChoice={handleTransformChoice}
@@ -1776,6 +2696,11 @@ const App: Component = () => {
             !!draggingBendingCircularFieldRadius()
           }
           pendingBendAtEndsDirty={bendAtEndsDirty()}
+          pendingSplitLine={!!pendingSplitLine()}
+          pendingAddAxis={!!pendingAddAxis()}
+          pendingModifyAxis={!!pendingModifyAxis()}
+          pendingDeleteAxisId={!!pendingDeleteAxisId()}
+          pendingAddPlaceOnAxis={!!pendingAddPlaceOnAxis()}
           bendAtEndsState={bendAtEndsState()}
           availableTransforms={availableTransformsList()}
           scale={scale()}
@@ -1859,6 +2784,87 @@ const App: Component = () => {
                   </g>
                 );
               })()}
+            {(() => {
+              const placesAbs = placesWithAbsolutePositions();
+              const rect = svg?.getBoundingClientRect?.();
+              const viewport: ViewportCanvas | null =
+                rect != null
+                  ? {
+                      left: -translateX() / scale(),
+                      top: -translateY() / scale(),
+                      width: rect.width / scale(),
+                      height: rect.height / scale(),
+                    }
+                  : null;
+              const pa = pendingAddAxis();
+              const pmod = pendingModifyAxis();
+              const axesToDraw: Array<{
+                id: AxisId | string;
+                placeId: PlaceId;
+                angle: number;
+              }> = axes().map((axis) => ({
+                id: axis.id,
+                placeId: axis.placeId,
+                angle:
+                  pmod?.axisId === axis.id ? pmod.angle : Number(axis.angle),
+              }));
+              if (pa)
+                axesToDraw.push({
+                  id: 'pending-axis',
+                  placeId: pa.placeId,
+                  angle: pa.angle,
+                });
+              return axesToDraw.map((axisLike) => {
+                const geom = getAxisWorldGeometry(
+                  {
+                    id: axisLike.id as AxisId,
+                    placeId: axisLike.placeId,
+                    angle: axisLike.angle,
+                  },
+                  placesAbs,
+                );
+                const seg =
+                  viewport != null
+                    ? axisSegmentInViewport(
+                        geom.originX,
+                        geom.originY,
+                        geom.worldAngle,
+                        viewport,
+                      )
+                    : {
+                        x1: geom.originX,
+                        y1: geom.originY,
+                        x2: geom.originX,
+                        y2: geom.originY,
+                      };
+                const isSelected =
+                  typeof axisLike.id === 'string'
+                    ? false
+                    : axisLike.id === selectedAxisId();
+                return (
+                  <g>
+                  <line
+                    x1={seg.x1}
+                    y1={seg.y1}
+                    x2={seg.x2}
+                    y2={seg.y2}
+                    stroke={
+                      isSelected
+                        ? svgTokens.placeSelectedStroke
+                        : svgTokens.orientationAxisStroke
+                    }
+                    stroke-width={
+                      isSelected
+                        ? svgTokens.placeSelectedStrokeWidth
+                        : svgTokens.orientationAxisStrokeWidth
+                    }
+                    stroke-dasharray={svgTokens.orientationAxisDasharray}
+                    style={svgTokens.pointerEventsNone}
+                  />
+                  </g>
+                );
+              });
+            })()}
             {(() => {
               const segs = lineSegmentsWithPositions();
               const fullSegs = lineSegments();
@@ -2227,7 +3233,20 @@ const App: Component = () => {
       </div>
       {/* Right pane: Drawing DNA */}
       <div class={classes.paneDna}>
-        <DrawingDNAPane />
+        <DrawingDNAPane
+          selectedAxisId={selectedAxisId()}
+          onSelectAxis={(id) => {
+            batch(() => {
+              setSelectedAxisId(id);
+              setSelectedPlaceId(null);
+              setSelectedLineSegmentId(null);
+              setSelectedCircularFieldId(null);
+              setSelectedBendingCircularFieldId(null);
+              setHasDrawingPaneSelected(false);
+              setGuideStep('transform');
+            });
+          }}
+        />
       </div>
     </div>
   );

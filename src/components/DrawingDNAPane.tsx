@@ -1,12 +1,18 @@
 import type { Component } from 'solid-js';
 import { createSignal } from 'solid-js';
+import type { AxisId } from '../lib/evolu-db';
 import { classes } from '../styles/tokens';
 import DrawingObjectsList from './DrawingObjectsList';
 import TransformationsList from './TransformationsList';
 
 type TabId = 'objects' | 'transformations';
 
-const DrawingDNAPane: Component = () => {
+interface DrawingDNAPaneProps {
+  selectedAxisId?: AxisId | null | undefined;
+  onSelectAxis?: ((id: AxisId) => void) | undefined;
+}
+
+const DrawingDNAPane: Component<DrawingDNAPaneProps> = (props) => {
   const [activeTab, setActiveTab] = createSignal<TabId>('objects');
 
   return (
@@ -37,7 +43,12 @@ const DrawingDNAPane: Component = () => {
         </button>
       </div>
       <div class={classes.dnaContent}>
-        {activeTab() === 'objects' && <DrawingObjectsList />}
+        {activeTab() === 'objects' && (
+          <DrawingObjectsList
+            selectedAxisId={props.selectedAxisId}
+            onSelectAxis={props.onSelectAxis}
+          />
+        )}
         {activeTab() === 'transformations' && <TransformationsList />}
       </div>
     </div>

@@ -4,11 +4,14 @@ import { useEvolu } from './evolu-db';
 
 /**
  * Solid hook to subscribe to an Evolu query.
- * Returns a signal with the query rows array, updating when data changes.
+ * Returns { rows, refresh }. refresh() re-loads the query and updates the signal.
  */
 export function useQuery<R extends Row>(query: Query<R>) {
   const evolu = useEvolu();
   const [rows, setRows] = createSignal<QueryRows<R>>([] as QueryRows<R>);
+
+  const refresh = (): Promise<void> =>
+    evolu.loadQuery(query).then(setRows).catch(() => {});
 
   createEffect(() => {
     let unsub: (() => void) | undefined;
@@ -26,5 +29,5 @@ export function useQuery<R extends Row>(query: Query<R>) {
     };
   });
 
-  return rows;
+  return { rows, refresh };
 }

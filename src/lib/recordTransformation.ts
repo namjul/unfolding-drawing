@@ -11,7 +11,13 @@
  * when the user commits that action.
  */
 
-import type { CircularFieldId, LineSegmentId, PlaceId } from './evolu-db';
+import type {
+  AxisId,
+  BendingCircularFieldId,
+  CircularFieldId,
+  LineSegmentId,
+  PlaceId,
+} from './evolu-db';
 import { evolu } from './evolu-db';
 
 /** Payload for place-add (canvas). */
@@ -91,6 +97,72 @@ export type RecordDeleteCircularField = {
   circularFieldId: CircularFieldId;
 };
 
+/** Payload for add bending circular field. */
+export type RecordAddBendingCircularField = {
+  kind: 'addBendingCircularField';
+  placeId: PlaceId;
+  lineSegmentId: LineSegmentId;
+  bendingCircularFieldId: BendingCircularFieldId;
+  radius: number;
+};
+
+/** Payload for modify bending circular field. */
+export type RecordModifyBendingCircularField = {
+  kind: 'modifyBendingCircularField';
+  placeId: PlaceId;
+  lineSegmentId: LineSegmentId;
+  bendingCircularFieldId: BendingCircularFieldId;
+  radius: number;
+};
+
+/** Payload for delete bending circular field. */
+export type RecordDeleteBendingCircularField = {
+  kind: 'deleteBendingCircularField';
+  placeId: PlaceId;
+  lineSegmentId: LineSegmentId;
+  bendingCircularFieldId: BendingCircularFieldId;
+};
+
+/** Payload for split line segment. */
+export type RecordSplitLine = {
+  kind: 'splitLine';
+  placeId: PlaceId;
+  lineSegmentId: LineSegmentId;
+  lineSegmentId2: LineSegmentId;
+  lineSegmentId3: LineSegmentId;
+};
+
+/** Payload for add axis. */
+export type RecordAddAxis = {
+  kind: 'addAxis';
+  placeId: PlaceId;
+  axisId: AxisId;
+  angle: number;
+};
+
+/** Payload for modify axis. */
+export type RecordModifyAxis = {
+  kind: 'modifyAxis';
+  placeId: PlaceId;
+  axisId: AxisId;
+  angle: number;
+};
+
+/** Payload for delete axis. */
+export type RecordDeleteAxis = {
+  kind: 'deleteAxis';
+  placeId: PlaceId;
+  axisId: AxisId;
+};
+
+/** Payload for add place on axis. */
+export type RecordAddPlaceOnAxis = {
+  kind: 'addPlaceOnAxis';
+  placeId: PlaceId;
+  axisId: AxisId;
+  distanceAlongAxis: number;
+};
+
 export type TransformationRecord =
   | RecordAdd
   | RecordAddRelated
@@ -101,7 +173,15 @@ export type TransformationRecord =
   | RecordDeleteLine
   | RecordAddCircularField
   | RecordModifyCircularField
-  | RecordDeleteCircularField;
+  | RecordDeleteCircularField
+  | RecordAddBendingCircularField
+  | RecordModifyBendingCircularField
+  | RecordDeleteBendingCircularField
+  | RecordSplitLine
+  | RecordAddAxis
+  | RecordModifyAxis
+  | RecordDeleteAxis
+  | RecordAddPlaceOnAxis;
 
 /**
  * Records one committed transformation. Call this exactly once per committed
@@ -213,6 +293,134 @@ export function recordTransformation(data: TransformationRecord): void {
         angle: null,
         lineSegmentId: null,
         circularFieldId: data.circularFieldId,
+        bendingCircularFieldId: null,
+        radius: null,
+      });
+      break;
+    case 'addBendingCircularField':
+      evolu.insert('transformation', {
+        kind: 'addBendingCircularField',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: data.lineSegmentId,
+        circularFieldId: null,
+        bendingCircularFieldId: data.bendingCircularFieldId,
+        radius: data.radius,
+      });
+      break;
+    case 'modifyBendingCircularField':
+      evolu.insert('transformation', {
+        kind: 'modifyBendingCircularField',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: data.lineSegmentId,
+        circularFieldId: null,
+        bendingCircularFieldId: data.bendingCircularFieldId,
+        radius: data.radius,
+      });
+      break;
+    case 'deleteBendingCircularField':
+      evolu.insert('transformation', {
+        kind: 'deleteBendingCircularField',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: data.lineSegmentId,
+        circularFieldId: null,
+        bendingCircularFieldId: data.bendingCircularFieldId,
+        radius: null,
+      });
+      break;
+    case 'splitLine':
+      evolu.insert('transformation', {
+        kind: 'splitLine',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: data.lineSegmentId,
+        lineSegmentId2: data.lineSegmentId2,
+        lineSegmentId3: data.lineSegmentId3,
+        circularFieldId: null,
+        bendingCircularFieldId: null,
+        axisId: null,
+        radius: null,
+      });
+      break;
+    case 'addAxis':
+      evolu.insert('transformation', {
+        kind: 'addAxis',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: data.angle,
+        lineSegmentId: null,
+        lineSegmentId2: null,
+        lineSegmentId3: null,
+        circularFieldId: null,
+        bendingCircularFieldId: null,
+        axisId: data.axisId,
+        radius: null,
+      });
+      break;
+    case 'modifyAxis':
+      evolu.insert('transformation', {
+        kind: 'modifyAxis',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: data.angle,
+        lineSegmentId: null,
+        lineSegmentId2: null,
+        lineSegmentId3: null,
+        circularFieldId: null,
+        bendingCircularFieldId: null,
+        axisId: data.axisId,
+        radius: null,
+      });
+      break;
+    case 'deleteAxis':
+      evolu.insert('transformation', {
+        kind: 'deleteAxis',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: null,
+        lineSegmentId2: null,
+        lineSegmentId3: null,
+        circularFieldId: null,
+        bendingCircularFieldId: null,
+        axisId: data.axisId,
+        radius: null,
+      });
+      break;
+    case 'addPlaceOnAxis':
+      evolu.insert('transformation', {
+        kind: 'addPlaceOnAxis',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: null,
+        lineSegmentId2: null,
+        lineSegmentId3: null,
+        circularFieldId: null,
+        bendingCircularFieldId: null,
+        axisId: data.axisId,
         radius: null,
       });
       break;
