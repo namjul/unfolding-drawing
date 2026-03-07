@@ -13,6 +13,12 @@ import DrawingDNAPane from './components/DrawingDNAPane';
 import type { GuideStep, TransformChoice } from './components/DrawingGuide';
 import DrawingGuide from './components/DrawingGuide';
 import {
+  axisSegmentInViewport,
+  getAxisWorldGeometry,
+  projectPointOntoAxis,
+  type ViewportCanvas,
+} from './lib/axisGeometry';
+import {
   type BendCircle,
   buildBentSegmentPath,
   distanceFromPointToBentPath,
@@ -22,28 +28,24 @@ import {
   getRelationshipSegments,
 } from './lib/drawingRelations';
 import {
+  type AxisId,
   allAxesQuery,
   allBendingCircularFieldsQuery,
   allCircularFieldsQuery,
+  allCircularRepeatersQuery,
   allLineSegmentEndsQuery,
   allLineSegmentsQuery,
   allPlacesQuery,
   allTransformationsQuery,
-  type AxisId,
   type BendingCircularFieldId,
   type CircularFieldId,
+  type CircularRepeaterId,
   type LineSegmentEndId,
   type LineSegmentId,
   type PlaceId,
   useEvolu,
 } from './lib/evolu-db';
 import { lineSegmentEndDisplayName } from './lib/lineSegmentEndName';
-import {
-  axisSegmentInViewport,
-  getAxisWorldGeometry,
-  projectPointOntoAxis,
-  type ViewportCanvas,
-} from './lib/axisGeometry';
 import {
   distanceFromPointToSegment,
   type LineSegmentWithPositions,
@@ -80,11 +82,12 @@ const CROSSHAIR_SIZE = 10;
 const PENDING_SPLIT_PLACE = '__pending_split_place__' as PlaceId;
 /** Sentinel id for the draggable preview place during "Add place on axis". */
 const PENDING_AXIS_PLACE = '__pending_axis_place__' as PlaceId;
+/** Sentinel id for the draggable preview place during "Add place on circular field". */
+const PENDING_CIRCULAR_FIELD_PLACE = '__pending_cf_place__' as PlaceId;
 
 const App: Component = () => {
   const evolu = useEvolu();
-  const { rows: placesRows, refresh: refreshPlaces } =
-    useQuery(allPlacesQuery);
+  const { rows: placesRows, refresh: refreshPlaces } = useQuery(allPlacesQuery);
   const { rows: transformationsRows, refresh: refreshTransformations } =
     useQuery(allTransformationsQuery);
   const { rows: lineSegmentEndsRows, refresh: refreshLineSegmentEnds } =
@@ -96,6 +99,7 @@ const App: Component = () => {
     allBendingCircularFieldsQuery,
   );
   const { rows: axesRows } = useQuery(allAxesQuery);
+  const { rows: circularRepeatersRows } = useQuery(allCircularRepeatersQuery);
   let svg!: SVGSVGElement;
 
   const [scale, setScale] = createSignal(1);
@@ -117,6 +121,8 @@ const App: Component = () => {
   const [selectedBendingCircularFieldId, setSelectedBendingCircularFieldId] =
     createSignal<BendingCircularFieldId | null>(null);
   const [selectedAxisId, setSelectedAxisId] = createSignal<AxisId | null>(null);
+  const [selectedCircularRepeaterId, setSelectedCircularRepeaterId] =
+    createSignal<CircularRepeaterId | null>(null);
   const [transformChoice, setTransformChoice] =
     createSignal<TransformChoice>(null);
   const [hasDrawingPaneSelected, setHasDrawingPaneSelected] =
@@ -138,22 +144,55 @@ const App: Component = () => {
     return childPlaces === 0 && endsAtPlace === 0 && fieldsAtPlace === 1;
   };
 
-  const availableTransformsList = createMemo(() => {
-    const selectionType = getSelectionType(
+  const selectionType = createMemo(() => {
+    let st = getSelectionType(
       hasDrawingPaneSelected(),
       selectedPlaceId(),
       selectedLineSegmentId(),
       selectedCircularFieldId(),
       selectedBendingCircularFieldId(),
       selectedAxisId(),
+      selectedCircularRepeaterId(),
     );
-    const list = getAvailableTransforms(selectionType);
-    if (selectionType !== 'circularField') return list;
+    if (st === 'place') {
+      const pid = selectedPlaceId();
+      if (pid) {
+        const place = places().find((p) => p.id === pid) as
+          | PlaceLike
+          | undefined;
+        const axisId = place?.parentAxisId;
+        if (axisId) {
+          const axis = axes().find((a) => a.id === axisId);
+          if (
+            axis &&
+            (axis as { circularRepeaterId?: CircularRepeaterId })
+              .circularRepeaterId
+          ) {
+            st = 'placeOnCircularRepeater';
+          }
+        }
+      }
+    }
+    return st;
+  });
+
+  const availableTransformsList = createMemo(() => {
+    const st = selectionType();
+    const list = getAvailableTransforms(st);
+    if (st !== 'circularField') return list;
     const cfId = selectedCircularFieldId();
     return list.filter(
       (t) => t.id !== 'moveCircularField' || isCircularFieldOnlyChild(cfId),
     );
   });
+
+  const [
+    pendingModifyPlaceOnCircularRepeater,
+    setPendingModifyPlaceOnCircularRepeater,
+  ] = createSignal<{
+    placeId: PlaceId;
+    circularRepeaterId: CircularRepeaterId;
+  } | null>(null);
 
   const [bendAtEndsDirty, setBendAtEndsDirty] = createSignal(false);
   const [pendingBendAtEndsAdded, setPendingBendAtEndsAdded] = createSignal<
@@ -217,12 +256,13 @@ const App: Component = () => {
       hasBendAtA: !!bendAtA,
       hasBendAtB: !!bendAtB,
       onToggleBendAtA: () => {
-        if (bendAtA) {
+        const placeIdA = endA.placeId;
+        if (bendAtA && placeIdA != null) {
           setPendingBendAtEndsDeleted((prev) => [
             ...prev,
             {
               id: bendAtA.id,
-              placeId: endA.placeId,
+              placeId: placeIdA,
               lineSegmentId: segId,
             },
           ]);
@@ -238,12 +278,12 @@ const App: Component = () => {
             offsetX,
             offsetY,
           });
-          if (res.ok) {
+          if (res.ok && placeIdA != null) {
             setPendingBendAtEndsAdded((prev) => [
               ...prev,
               {
                 id: res.value.id,
-                placeId: endA.placeId,
+                placeId: placeIdA,
                 lineSegmentId: segId,
                 radius,
               },
@@ -253,12 +293,13 @@ const App: Component = () => {
         setBendAtEndsDirty(true);
       },
       onToggleBendAtB: () => {
-        if (bendAtB) {
+        const placeIdB = endB.placeId;
+        if (bendAtB && placeIdB != null) {
           setPendingBendAtEndsDeleted((prev) => [
             ...prev,
             {
               id: bendAtB.id,
-              placeId: endB.placeId,
+              placeId: placeIdB,
               lineSegmentId: segId,
             },
           ]);
@@ -274,12 +315,12 @@ const App: Component = () => {
             offsetX,
             offsetY,
           });
-          if (res.ok) {
+          if (res.ok && placeIdB != null) {
             setPendingBendAtEndsAdded((prev) => [
               ...prev,
               {
                 id: res.value.id,
-                placeId: endB.placeId,
+                placeId: placeIdB,
                 lineSegmentId: segId,
                 radius,
               },
@@ -323,6 +364,8 @@ const App: Component = () => {
         circularFieldId: CircularFieldId;
         radius: number;
         isNewPlace: boolean;
+        /** When adding at multiple echo places, all circular field ids for radius sync. */
+        circularFieldIds?: CircularFieldId[];
       };
   const [pendingAddCircularField, setPendingAddCircularField] =
     createSignal<PendingAddCircularField | null>(null);
@@ -363,11 +406,15 @@ const App: Component = () => {
   const [pendingAddAxis, setPendingAddAxis] = createSignal<{
     placeId: PlaceId;
     angle: number;
+    isBidirectional: boolean;
+    /** When adding axis at each echo place, commit inserts N axes. */
+    echoPlaceIds?: PlaceId[];
   } | null>(null);
   const [pendingModifyAxis, setPendingModifyAxis] = createSignal<{
     axisId: AxisId;
     placeId: PlaceId;
     angle: number;
+    isBidirectional: boolean;
   } | null>(null);
   const [pendingDeleteAxisId, setPendingDeleteAxisId] =
     createSignal<AxisId | null>(null);
@@ -378,6 +425,37 @@ const App: Component = () => {
   const [draggingAxisAngle, setDraggingAxisAngle] = createSignal(false);
   const [draggingPlaceOnAxis, setDraggingPlaceOnAxis] =
     createSignal<AxisId | null>(null);
+  const [pendingAddPlaceOnCircularField, setPendingAddPlaceOnCircularField] =
+    createSignal<{
+      circularFieldId: CircularFieldId;
+      angleOnCircle: number;
+    } | null>(null);
+  const [draggingPlaceOnCircularField, setDraggingPlaceOnCircularField] =
+    createSignal<CircularFieldId | null>(null);
+  const [pendingAddCircularRepeater, setPendingAddCircularRepeater] =
+    createSignal<{ placeId: PlaceId; count: number } | null>(null);
+  const [pendingModifyCircularRepeater, setPendingModifyCircularRepeater] =
+    createSignal<{
+      circularRepeaterId: CircularRepeaterId;
+      count: number;
+    } | null>(null);
+  const [
+    pendingAddPlaceOnCircularRepeater,
+    setPendingAddPlaceOnCircularRepeater,
+  ] = createSignal<{
+    circularRepeaterId: CircularRepeaterId;
+    distanceAlongAxis: number;
+    distanceFromAxis?: number;
+  } | null>(null);
+  const [pendingDeleteCircularRepeaterId, setPendingDeleteCircularRepeaterId] =
+    createSignal<CircularRepeaterId | null>(null);
+  const [draggingPlaceOnCircularRepeater, setDraggingPlaceOnCircularRepeater] =
+    createSignal<CircularRepeaterId | null>(null);
+  /** Cursor position in canvas coords for moving handles (orientation axis, axis). */
+  const [lastCursorCanvas, setLastCursorCanvas] = createSignal<{
+    x: number;
+    y: number;
+  } | null>(null);
 
   const places = () => placesRows();
   const lineSegmentEnds = () => lineSegmentEndsRows();
@@ -387,6 +465,10 @@ const App: Component = () => {
   const axes = () =>
     axesRows().filter(
       (a): a is typeof a & { placeId: PlaceId } => a.placeId != null,
+    );
+  const circularRepeaters = () =>
+    circularRepeatersRows().filter(
+      (r): r is typeof r & { placeId: PlaceId } => r.placeId != null,
     );
 
   createEffect(() => {
@@ -400,6 +482,7 @@ const App: Component = () => {
         setSelectedPlaceId(null);
         setSelectedLineSegmentId(null);
         setSelectedAxisId(null);
+        setSelectedCircularRepeaterId(null);
         setGuideStep('transform');
       });
     }
@@ -438,6 +521,10 @@ const App: Component = () => {
     parentId: PlaceId | null;
     parentAxisId?: AxisId | null;
     distanceAlongAxis?: number | null;
+    distanceFromAxis?: number | null;
+    repeaterEchoGroupId?: PlaceId | null;
+    parentCircularFieldId?: CircularFieldId | null;
+    angleOnCircle?: number | null;
     x: number | null;
     y: number | null;
     angle?: number | null;
@@ -476,6 +563,20 @@ const App: Component = () => {
           );
           worldAngle = parentRes.worldAngle + (axis ? Number(axis.angle) : 0);
         }
+      } else if (place.parentCircularFieldId != null) {
+        const cf = circularFields().find(
+          (c) => c.id === place.parentCircularFieldId,
+        );
+        const parent = cf ? placesList.find((p) => p.id === cf.placeId) : null;
+        if (parent) {
+          const parentRes = getAbsolutePosition(
+            parent,
+            placesList,
+            moveOverride,
+            angleOverride,
+          );
+          worldAngle = parentRes.worldAngle;
+        }
       } else if (place.parentId !== null) {
         const parent = placesList.find((p) => p.id === place.parentId);
         if (parent) {
@@ -502,12 +603,45 @@ const App: Component = () => {
           moveOverride,
           angleOverride,
         );
-        const worldAngle = parentRes.worldAngle + Number(axis.angle);
-        const d = place.distanceAlongAxis ?? 0;
+        const baseAxisAngle =
+          parentRes.worldAngle + Number(axis.angle);
+        const worldAngle =
+          angleOverride && place.id === angleOverride.placeId
+            ? angleOverride.angle
+            : baseAxisAngle + (place.angle ?? 0);
+        let d = place.distanceAlongAxis ?? 0;
+        if (axis.isBidirectional === 0) d = Math.max(0, d);
+        const perp = place.distanceFromAxis ?? 0;
+        const cosA = Math.cos(baseAxisAngle);
+        const sinA = Math.sin(baseAxisAngle);
         return {
-          x: parentRes.x + d * Math.cos(worldAngle),
-          y: parentRes.y + d * Math.sin(worldAngle),
+          x: parentRes.x + d * cosA + perp * -sinA,
+          y: parentRes.y + d * sinA + perp * cosA,
           worldAngle,
+        };
+      }
+    }
+    if (place.parentCircularFieldId != null) {
+      const cf = circularFields().find(
+        (c) => c.id === place.parentCircularFieldId,
+      );
+      const parent = cf ? placesList.find((p) => p.id === cf.placeId) : null;
+      if (cf && parent) {
+        const parentRes = getAbsolutePosition(
+          parent,
+          placesList,
+          moveOverride,
+          angleOverride,
+        );
+        const radius = Number(cf.radius);
+        const angleOnCircle = place.angleOnCircle ?? 0;
+        const localX = radius * Math.cos(angleOnCircle);
+        const localY = radius * Math.sin(angleOnCircle);
+        const rotated = rotateBy(parentRes.worldAngle, localX, localY);
+        return {
+          x: parentRes.x + rotated.x,
+          y: parentRes.y + rotated.y,
+          worldAngle: parentRes.worldAngle,
         };
       }
     }
@@ -553,6 +687,70 @@ const App: Component = () => {
     };
   };
 
+  /** Given a repeater and a world point, return (distanceAlongAxis, distanceFromAxis) in the frame of the nearest repeater axis. */
+  const repeaterPointToAxisParams = (
+    circularRepeaterId: CircularRepeaterId,
+    cx: number,
+    cy: number,
+    placesAbs: ReadonlyArray<{
+      id: PlaceId;
+      absX: number;
+      absY: number;
+      absWorldAngle: number;
+    }>,
+  ): { distanceAlongAxis: number; distanceFromAxis: number } => {
+    const repAxes = axes().filter(
+      (a) =>
+        (a as { circularRepeaterId?: CircularRepeaterId })
+          .circularRepeaterId === circularRepeaterId,
+    );
+    let best: { d: number; perp: number; absPerp: number } | null = null;
+    let fallback: { d: number; perp: number; absPerp: number } | null = null;
+    for (const axis of repAxes) {
+      const geom = getAxisWorldGeometry(
+        { id: axis.id, placeId: axis.placeId, angle: Number(axis.angle) },
+        placesAbs,
+      );
+      let d = projectPointOntoAxis(
+        cx,
+        cy,
+        geom.originX,
+        geom.originY,
+        geom.worldAngle,
+      );
+      const cosA = Math.cos(geom.worldAngle);
+      const sinA = Math.sin(geom.worldAngle);
+      const projX = geom.originX + d * cosA;
+      const projY = geom.originY + d * sinA;
+      const perp = (cx - projX) * -sinA + (cy - projY) * cosA;
+      const absPerp = Math.abs(perp);
+      // For unidirectional axes, only consider this axis if the click is in the forward direction (d >= 0).
+      // Otherwise we would pick an axis "behind" the click and clamp d to 0, snapping position to the center.
+      if (axis.isBidirectional === 0) {
+        if (d >= 0) {
+          d = Math.max(0, d);
+          if (best == null || absPerp < best.absPerp) {
+            best = { d, perp, absPerp };
+          }
+        } else if (fallback == null || absPerp < fallback.absPerp) {
+          fallback = { d: 0, perp, absPerp };
+        }
+      } else {
+        if (best == null || absPerp < best.absPerp) {
+          best = { d, perp, absPerp };
+        }
+      }
+    }
+    const chosen = best ?? fallback;
+    if (chosen == null) {
+      return { distanceAlongAxis: 0, distanceFromAxis: 0 };
+    }
+    return {
+      distanceAlongAxis: chosen.d,
+      distanceFromAxis: chosen.perp,
+    };
+  };
+
   const placesWithAbsolutePositions = () => {
     const pl = places();
     const pm = pendingMove();
@@ -566,12 +764,310 @@ const App: Component = () => {
       const abs = getAbsolutePosition(p, pl, moveOverride, angleOverride);
       return { ...p, absX: abs.x, absY: abs.y, absWorldAngle: abs.worldAngle };
     });
+    if (pr) {
+      const rotatedPlace = pl.find((p) => p.id === pr.placeId) as
+        | PlaceLike
+        | undefined;
+      const groupId = rotatedPlace?.repeaterEchoGroupId;
+      if (groupId != null && rotatedPlace) {
+        const rotatedPlaceUnrotated = getAbsolutePosition(
+          rotatedPlace,
+          pl,
+          moveOverride,
+          null,
+        );
+        const delta = pr.angle - rotatedPlaceUnrotated.worldAngle;
+        for (let i = 0; i < result.length; i++) {
+          if ((result[i] as PlaceLike).repeaterEchoGroupId !== groupId) continue;
+          const unrotated =
+            result[i].id === pr.placeId
+              ? rotatedPlaceUnrotated.worldAngle
+              : result[i].absWorldAngle;
+          result[i] = {
+            ...result[i],
+            absWorldAngle: unrotated + delta,
+          } as (typeof result)[number];
+        }
+        const updatedIds = new Set<PlaceId>();
+        for (let i = 0; i < result.length; i++) {
+          if ((result[i] as PlaceLike).repeaterEchoGroupId !== groupId) continue;
+          updatedIds.add(result[i].id);
+        }
+        const getPlaceDependency = (place: PlaceLike): PlaceId | null => {
+          if (place.parentId != null) return place.parentId;
+          if (place.parentAxisId != null) {
+            const ax = axes().find((a) => a.id === place.parentAxisId);
+            return ax ? ax.placeId : null;
+          }
+          if (place.parentCircularFieldId != null) {
+            const cf = circularFields().find(
+              (c) => c.id === place.parentCircularFieldId,
+            );
+            return cf ? cf.placeId : null;
+          }
+          return null;
+        };
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (let i = 0; i < result.length; i++) {
+            const p = result[i];
+            const depId = getPlaceDependency(p as PlaceLike);
+            if (
+              depId == null ||
+              !updatedIds.has(depId) ||
+              updatedIds.has(p.id)
+            )
+              continue;
+            const parentAbs = result.find((r) => r.id === depId);
+            if (!parentAbs) continue;
+            let absX: number;
+            let absY: number;
+            let absWorldAngle: number;
+            if (p.parentId != null) {
+              const localOffset = {
+                x: (p as PlaceLike).x ?? 0,
+                y: (p as PlaceLike).y ?? 0,
+              };
+              const rotated = rotateBy(
+                parentAbs.absWorldAngle,
+                localOffset.x,
+                localOffset.y,
+              );
+              absX = parentAbs.absX + rotated.x;
+              absY = parentAbs.absY + rotated.y;
+              absWorldAngle =
+                parentAbs.absWorldAngle + ((p as PlaceLike).angle ?? 0);
+            } else if ((p as PlaceLike).parentAxisId != null) {
+              const ax = axes().find(
+                (a) => a.id === (p as PlaceLike).parentAxisId,
+              );
+              if (!ax) continue;
+              const worldAngle =
+                parentAbs.absWorldAngle + Number(ax.angle) +
+                ((p as PlaceLike).angle ?? 0);
+              let d = (p as PlaceLike).distanceAlongAxis ?? 0;
+              if (ax.isBidirectional === 0) d = Math.max(0, d);
+              const perp = (p as PlaceLike).distanceFromAxis ?? 0;
+              const cosA = Math.cos(worldAngle);
+              const sinA = Math.sin(worldAngle);
+              absX = parentAbs.absX + d * cosA + perp * -sinA;
+              absY = parentAbs.absY + d * sinA + perp * cosA;
+              absWorldAngle = worldAngle;
+            } else if ((p as PlaceLike).parentCircularFieldId != null) {
+              const cf = circularFields().find(
+                (c) => c.id === (p as PlaceLike).parentCircularFieldId,
+              );
+              if (!cf) continue;
+              const radius = Number(cf.radius);
+              const angleOnCircle = (p as PlaceLike).angleOnCircle ?? 0;
+              const localX = radius * Math.cos(angleOnCircle);
+              const localY = radius * Math.sin(angleOnCircle);
+              const rotated = rotateBy(
+                parentAbs.absWorldAngle,
+                localX,
+                localY,
+              );
+              absX = parentAbs.absX + rotated.x;
+              absY = parentAbs.absY + rotated.y;
+              absWorldAngle = parentAbs.absWorldAngle;
+            } else continue;
+            result[i] = {
+              ...p,
+              absX,
+              absY,
+              absWorldAngle,
+            } as (typeof result)[number];
+            updatedIds.add(p.id);
+            changed = true;
+          }
+        }
+      }
+    }
+    if (pm && pm.placeId !== 'pending') {
+      const movedPlace = pl.find((p) => p.id === pm.placeId) as
+        | PlaceLike
+        | undefined;
+      const groupId = movedPlace?.repeaterEchoGroupId;
+      if (groupId != null && movedPlace) {
+        const runDescendantPropagation = () => {
+          const updatedIds = new Set<PlaceId>();
+          for (let i = 0; i < result.length; i++) {
+            const p = result[i];
+            if ((p as PlaceLike).repeaterEchoGroupId !== groupId) continue;
+            updatedIds.add(p.id);
+          }
+          const getPlaceDependency = (place: PlaceLike): PlaceId | null => {
+            if (place.parentId != null) return place.parentId;
+            if (place.parentAxisId != null) {
+              const ax = axes().find((a) => a.id === place.parentAxisId);
+              return ax ? ax.placeId : null;
+            }
+            if (place.parentCircularFieldId != null) {
+              const cf = circularFields().find(
+                (c) => c.id === place.parentCircularFieldId,
+              );
+              return cf ? cf.placeId : null;
+            }
+            return null;
+          };
+          let changed = true;
+          while (changed) {
+            changed = false;
+            for (let i = 0; i < result.length; i++) {
+              const p = result[i];
+              const depId = getPlaceDependency(p as PlaceLike);
+              if (
+                depId == null ||
+                !updatedIds.has(depId) ||
+                updatedIds.has(p.id)
+              )
+                continue;
+              const parentAbs = result.find((r) => r.id === depId);
+              if (!parentAbs) continue;
+              let absX: number;
+              let absY: number;
+              let absWorldAngle: number;
+              if (p.parentId != null) {
+                const localOffset = {
+                  x: (p as PlaceLike).x ?? 0,
+                  y: (p as PlaceLike).y ?? 0,
+                };
+                const rotated = rotateBy(
+                  parentAbs.absWorldAngle,
+                  localOffset.x,
+                  localOffset.y,
+                );
+                absX = parentAbs.absX + rotated.x;
+                absY = parentAbs.absY + rotated.y;
+                absWorldAngle =
+                  parentAbs.absWorldAngle + ((p as PlaceLike).angle ?? 0);
+              } else if ((p as PlaceLike).parentAxisId != null) {
+                const ax = axes().find(
+                  (a) => a.id === (p as PlaceLike).parentAxisId,
+                );
+                if (!ax) continue;
+                const worldAngle =
+                  parentAbs.absWorldAngle + Number(ax.angle);
+                let d = (p as PlaceLike).distanceAlongAxis ?? 0;
+                if (ax.isBidirectional === 0) d = Math.max(0, d);
+                const perp = (p as PlaceLike).distanceFromAxis ?? 0;
+                const cosA = Math.cos(worldAngle);
+                const sinA = Math.sin(worldAngle);
+                absX = parentAbs.absX + d * cosA + perp * -sinA;
+                absY = parentAbs.absY + d * sinA + perp * cosA;
+                absWorldAngle = worldAngle;
+              } else if ((p as PlaceLike).parentCircularFieldId != null) {
+                const cf = circularFields().find(
+                  (c) => c.id === (p as PlaceLike).parentCircularFieldId,
+                );
+                if (!cf) continue;
+                const radius = Number(cf.radius);
+                const angleOnCircle = (p as PlaceLike).angleOnCircle ?? 0;
+                const localX = radius * Math.cos(angleOnCircle);
+                const localY = radius * Math.sin(angleOnCircle);
+                const rotated = rotateBy(
+                  parentAbs.absWorldAngle,
+                  localX,
+                  localY,
+                );
+                absX = parentAbs.absX + rotated.x;
+                absY = parentAbs.absY + rotated.y;
+                absWorldAngle = parentAbs.absWorldAngle;
+              } else continue;
+              result[i] = {
+                ...p,
+                absX,
+                absY,
+                absWorldAngle,
+              } as (typeof result)[number];
+              updatedIds.add(p.id);
+              changed = true;
+            }
+          }
+        };
+        if (movedPlace.parentAxisId != null) {
+          const axis = axes().find((a) => a.id === movedPlace.parentAxisId);
+          const parent = axis ? pl.find((p) => p.id === axis.placeId) : null;
+          if (axis && parent) {
+            const parentAbs = getAbsolutePosition(parent, pl);
+            const worldAngle = parentAbs.worldAngle + Number(axis.angle);
+            let d = projectPointOntoAxis(
+              pm.x,
+              pm.y,
+              parentAbs.x,
+              parentAbs.y,
+              worldAngle,
+            );
+            if (axis.isBidirectional === 0) d = Math.max(0, d);
+            const cosA = Math.cos(worldAngle);
+            const sinA = Math.sin(worldAngle);
+            const perp =
+              (pm.x - (parentAbs.x + d * cosA)) * -sinA +
+              (pm.y - (parentAbs.y + d * sinA)) * cosA;
+            for (let i = 0; i < result.length; i++) {
+              const p = result[i];
+              if ((p as PlaceLike).repeaterEchoGroupId !== groupId) continue;
+              const pAxisId = (p as PlaceLike).parentAxisId;
+              if (pAxisId == null) continue;
+              const pAxis = axes().find((a) => a.id === pAxisId);
+              const pParent = pAxis
+                ? pl.find((x) => x.id === pAxis.placeId)
+                : null;
+              if (!pAxis || !pParent) continue;
+              const pParentAbs = getAbsolutePosition(pParent, pl);
+              const pWorldAngle = pParentAbs.worldAngle + Number(pAxis.angle);
+              const pCos = Math.cos(pWorldAngle);
+              const pSin = Math.sin(pWorldAngle);
+              result[i] = {
+                ...p,
+                absX: pParentAbs.x + d * pCos + perp * -pSin,
+                absY: pParentAbs.y + d * pSin + perp * pCos,
+                absWorldAngle: pWorldAngle,
+              } as (typeof result)[number];
+            }
+            runDescendantPropagation();
+          }
+        } else if (movedPlace.parentId != null) {
+          const movedParentAbs = result.find(
+            (r) => r.id === movedPlace.parentId,
+          );
+          if (movedParentAbs) {
+            const worldDx = pm.x - movedParentAbs.absX;
+            const worldDy = pm.y - movedParentAbs.absY;
+            const newLocal = rotateBy(
+              -movedParentAbs.absWorldAngle,
+              worldDx,
+              worldDy,
+            );
+            for (let i = 0; i < result.length; i++) {
+              const p = result[i];
+              if ((p as PlaceLike).repeaterEchoGroupId !== groupId) continue;
+              const parentId = (p as PlaceLike).parentId;
+              if (parentId == null) continue;
+              const parentAbs = result.find((r) => r.id === parentId);
+              if (!parentAbs) continue;
+              const rotated = rotateBy(
+                parentAbs.absWorldAngle,
+                newLocal.x,
+                newLocal.y,
+              );
+              result[i] = {
+                ...p,
+                absX: parentAbs.absX + rotated.x,
+                absY: parentAbs.absY + rotated.y,
+                absWorldAngle: p.absWorldAngle,
+              } as (typeof result)[number];
+            }
+            runDescendantPropagation();
+          }
+        }
+      }
+    }
     const ps = pendingSplitLine();
     if (ps) {
-      const previewX =
-        pm?.placeId === PENDING_SPLIT_PLACE ? pm.x : ps.previewX;
-      const previewY =
-        pm?.placeId === PENDING_SPLIT_PLACE ? pm.y : ps.previewY;
+      const previewX = pm?.placeId === PENDING_SPLIT_PLACE ? pm.x : ps.previewX;
+      const previewY = pm?.placeId === PENDING_SPLIT_PLACE ? pm.y : ps.previewY;
       result.push({
         id: PENDING_SPLIT_PLACE,
         parentId: null,
@@ -597,18 +1093,13 @@ const App: Component = () => {
             moveOverride,
             angleOverride,
           );
-          const worldAngle =
-            parentAbs.worldAngle + Number(axis.angle);
+          const worldAngle = parentAbs.worldAngle + Number(axis.angle);
           const px =
-            parentAbs.x +
-            paPlace.distanceAlongAxis * Math.cos(worldAngle);
+            parentAbs.x + paPlace.distanceAlongAxis * Math.cos(worldAngle);
           const py =
-            parentAbs.y +
-            paPlace.distanceAlongAxis * Math.sin(worldAngle);
-          const previewPx =
-            pm?.placeId === PENDING_AXIS_PLACE ? pm.x : px;
-          const previewPy =
-            pm?.placeId === PENDING_AXIS_PLACE ? pm.y : py;
+            parentAbs.y + paPlace.distanceAlongAxis * Math.sin(worldAngle);
+          const previewPx = pm?.placeId === PENDING_AXIS_PLACE ? pm.x : px;
+          const previewPy = pm?.placeId === PENDING_AXIS_PLACE ? pm.y : py;
           result.push({
             id: PENDING_AXIS_PLACE,
             parentId: null,
@@ -625,12 +1116,132 @@ const App: Component = () => {
         }
       }
     }
+    const paRep = pendingAddPlaceOnCircularRepeater();
+    if (paRep) {
+      const repAxes = axes().filter(
+        (a) =>
+          (a as { circularRepeaterId?: CircularRepeaterId })
+            .circularRepeaterId === paRep.circularRepeaterId,
+      );
+      const perp = paRep.distanceFromAxis ?? 0;
+      for (let i = 0; i < repAxes.length; i++) {
+        const axis = repAxes[i];
+        if (!axis) continue;
+        const parentPlace = pl.find((p) => p.id === axis.placeId);
+        if (parentPlace) {
+          const parentAbs = getAbsolutePosition(
+            parentPlace,
+            pl,
+            moveOverride,
+            angleOverride,
+          );
+          const worldAngle = parentAbs.worldAngle + Number(axis.angle);
+          const d = Math.max(0, paRep.distanceAlongAxis);
+          const cosA = Math.cos(worldAngle);
+          const sinA = Math.sin(worldAngle);
+          const px = parentAbs.x + d * cosA + perp * -sinA;
+          const py = parentAbs.y + d * sinA + perp * cosA;
+          result.push({
+            id: `__pending_rep_${i}__` as PlaceId,
+            parentId: null,
+            parentAxisId: null,
+            x: 0,
+            y: 0,
+            angle: null,
+            name: null,
+            isScaffolding: 1,
+            absX: px,
+            absY: py,
+            absWorldAngle: worldAngle,
+          } as (typeof result)[number]);
+        }
+      }
+    }
+    const pac = pendingAddPlaceOnCircularField();
+    if (pac) {
+      const cf = circularFields().find((c) => c.id === pac.circularFieldId);
+      if (cf) {
+        const parentPlace = pl.find((p) => p.id === cf.placeId);
+        if (parentPlace) {
+          const parentAbs = getAbsolutePosition(
+            parentPlace,
+            pl,
+            moveOverride,
+            angleOverride,
+          );
+          const radius = Number(cf.radius);
+          const angleOnCircle = pac.angleOnCircle;
+          const localX = radius * Math.cos(angleOnCircle);
+          const localY = radius * Math.sin(angleOnCircle);
+          const rotated = rotateBy(parentAbs.worldAngle, localX, localY);
+          const px = parentAbs.x + rotated.x;
+          const py = parentAbs.y + rotated.y;
+          const previewPx =
+            pm?.placeId === PENDING_CIRCULAR_FIELD_PLACE ? pm.x : px;
+          const previewPy =
+            pm?.placeId === PENDING_CIRCULAR_FIELD_PLACE ? pm.y : py;
+          result.push({
+            id: PENDING_CIRCULAR_FIELD_PLACE,
+            parentId: null,
+            parentCircularFieldId: null,
+            x: 0,
+            y: 0,
+            angle: null,
+            name: null,
+            isScaffolding: 1,
+            absX: previewPx,
+            absY: previewPy,
+            absWorldAngle: parentAbs.worldAngle,
+          } as (typeof result)[number]);
+        }
+      }
+    }
     return result;
   };
 
   const relatedPlaceIds = createMemo(() =>
     getRelatedPlaceIds(selectedPlaceId(), places()),
   );
+
+  /** When the selected place is in a repeater echo group, the set of all place ids in that group (for highlighting). */
+  const selectedEchoGroupPlaceIds = createMemo(() => {
+    const sid = selectedPlaceId();
+    if (!sid) return new Set<PlaceId>();
+    const place = places().find((p) => p.id === sid) as PlaceLike | undefined;
+    const gid = place?.repeaterEchoGroupId;
+    if (gid == null) return new Set<PlaceId>([sid]);
+    return new Set(
+      places()
+        .filter((p) => (p as PlaceLike).repeaterEchoGroupId === gid)
+        .map((p) => p.id),
+    );
+  });
+
+  /** The place on which to show the move handle: selected place, or if an echo group the echo closest to the cursor. */
+  const moveHandlePlaceId = createMemo(() => {
+    const sid = selectedPlaceId();
+    if (!sid) return null;
+    const place = places().find((p) => p.id === sid) as PlaceLike | undefined;
+    const gid = place?.repeaterEchoGroupId;
+    if (gid == null) return sid;
+    const cursor = lastCursorCanvas();
+    const placesAbs = placesWithAbsolutePositions();
+    const groupPlaces = placesAbs.filter(
+      (p) => (p as PlaceLike).repeaterEchoGroupId === gid,
+    );
+    if (groupPlaces.length === 0) return sid;
+    if (!cursor) return sid;
+    let bestId: PlaceId = sid;
+    let bestD = Infinity;
+    for (const p of groupPlaces) {
+      const d = Math.hypot(p.absX - cursor.x, p.absY - cursor.y);
+      if (d < bestD) {
+        bestD = d;
+        bestId = p.id;
+      }
+    }
+    return bestId;
+  });
 
   const relationshipSegments = createMemo(() =>
     getRelationshipSegments(selectedPlaceId(), placesWithAbsolutePositions()),
@@ -652,7 +1263,9 @@ const App: Component = () => {
   };
 
   const findPlaceAt = (cx: number, cy: number) =>
-    placesWithAbsolutePositions().find((p) => isPlaceAt(cx, cy, p));
+    placesWithAbsolutePositions().find(
+      (p) => !String(p.id).startsWith('__pending_rep_') && isPlaceAt(cx, cy, p),
+    );
 
   const lineSegmentsWithPositions = (): LineSegmentWithPositions[] => {
     const pl = places();
@@ -694,17 +1307,13 @@ const App: Component = () => {
       })
       .filter((s): s is LineSegmentWithPositions => s != null);
     if (ps) {
-      const previewX =
-        pm?.placeId === PENDING_SPLIT_PLACE ? pm.x : ps.previewX;
-      const previewY =
-        pm?.placeId === PENDING_SPLIT_PLACE ? pm.y : ps.previewY;
+      const previewX = pm?.placeId === PENDING_SPLIT_PLACE ? pm.x : ps.previewX;
+      const previewY = pm?.placeId === PENDING_SPLIT_PLACE ? pm.y : ps.previewY;
       const posA = getPlaceAbs(ps.placeAId);
       const posB = getPlaceAbs(ps.placeBId);
       const origSeg = segs.find((s) => s.id === ps.segmentId);
       const isScaff =
-        origSeg?.isScaffolding != null
-          ? Number(origSeg.isScaffolding)
-          : null;
+        origSeg?.isScaffolding != null ? Number(origSeg.isScaffolding) : null;
       if (posA && posB) {
         const synIdA = 'split-preview-a' as LineSegmentId;
         const synIdB = 'split-preview-b' as LineSegmentId;
@@ -902,11 +1511,14 @@ const App: Component = () => {
         },
         placesAbs,
       );
+      const unidirectional = axis.isBidirectional === 0;
       const seg = axisSegmentInViewport(
         geom.originX,
         geom.originY,
         geom.worldAngle,
         viewport,
+        100,
+        { unidirectional },
       );
       const dist = distanceFromPointToSegment(
         cx,
@@ -931,11 +1543,16 @@ const App: Component = () => {
     cy: number,
     angle: number,
     threshold = 36,
+    useMathConvention = false,
   ) => {
-    const ex = cx + ORIENTATION_AXIS_LENGTH * Math.sin(angle);
-    const ey = cy - ORIENTATION_AXIS_LENGTH * Math.cos(angle);
-    const dx = ex - cx;
-    const dy = ey - cy;
+    const dx = useMathConvention
+      ? ORIENTATION_AXIS_LENGTH * Math.cos(angle)
+      : ORIENTATION_AXIS_LENGTH * Math.sin(angle);
+    const dy = useMathConvention
+      ? ORIENTATION_AXIS_LENGTH * Math.sin(angle)
+      : -ORIENTATION_AXIS_LENGTH * Math.cos(angle);
+    const ex = cx + dx;
+    const ey = cy + dy;
     const len = Math.hypot(dx, dy);
     if (len < 1e-6) return Math.hypot(px - cx, py - cy) <= threshold;
     const t = Math.max(
@@ -964,6 +1581,7 @@ const App: Component = () => {
         setSelectedCircularFieldId(null);
         setSelectedBendingCircularFieldId(null);
         setSelectedAxisId(null);
+        setSelectedCircularRepeaterId(null);
         setHasDrawingPaneSelected(false);
       } else {
         const lineHit = findLineSegmentAtCursor(cx, cy);
@@ -973,6 +1591,7 @@ const App: Component = () => {
           setSelectedCircularFieldId(null);
           setSelectedBendingCircularFieldId(null);
           setSelectedAxisId(null);
+          setSelectedCircularRepeaterId(null);
           setHasDrawingPaneSelected(false);
         } else {
           const cfHit = findCircularFieldAt(cx, cy);
@@ -982,6 +1601,7 @@ const App: Component = () => {
             setSelectedLineSegmentId(null);
             setSelectedBendingCircularFieldId(null);
             setSelectedAxisId(null);
+            setSelectedCircularRepeaterId(null);
             setHasDrawingPaneSelected(false);
           } else {
             const bfHit = findBendingCircularFieldAt(cx, cy);
@@ -991,11 +1611,23 @@ const App: Component = () => {
               setSelectedLineSegmentId(null);
               setSelectedCircularFieldId(null);
               setSelectedAxisId(null);
+              setSelectedCircularRepeaterId(null);
               setHasDrawingPaneSelected(false);
             } else {
               const axisHit = findAxisAt(cx, cy);
               if (axisHit) {
-                setSelectedAxisId(axisHit);
+                const axisRow = axes().find((a) => a.id === axisHit);
+                const repeaterId = axisRow
+                  ? (axisRow as { circularRepeaterId?: CircularRepeaterId })
+                      .circularRepeaterId
+                  : undefined;
+                if (repeaterId != null) {
+                  setSelectedCircularRepeaterId(repeaterId);
+                  setSelectedAxisId(null);
+                } else {
+                  setSelectedAxisId(axisHit);
+                  setSelectedCircularRepeaterId(null);
+                }
                 setSelectedPlaceId(null);
                 setSelectedLineSegmentId(null);
                 setSelectedCircularFieldId(null);
@@ -1007,6 +1639,7 @@ const App: Component = () => {
                 setSelectedCircularFieldId(null);
                 setSelectedBendingCircularFieldId(null);
                 setSelectedAxisId(null);
+                setSelectedCircularRepeaterId(null);
                 setHasDrawingPaneSelected(true);
               }
             }
@@ -1105,6 +1738,30 @@ const App: Component = () => {
       }
     }
 
+    const paModRep = pendingModifyPlaceOnCircularRepeater();
+    if (
+      gs === 'execute' &&
+      tc === 'modifyPlaceOnCircularRepeater' &&
+      paModRep &&
+      hit
+    ) {
+      const modPlace = places().find((p) => p.id === paModRep.placeId) as
+        | PlaceLike
+        | undefined;
+      const groupId = modPlace?.repeaterEchoGroupId;
+      if (
+        groupId != null &&
+        (hit as PlaceLike).repeaterEchoGroupId === groupId
+      ) {
+        setPendingMove({
+          placeId: hit.id,
+          x: hit.absX,
+          y: hit.absY,
+        });
+        return;
+      }
+    }
+
     if (gs === 'execute' && tc === 'move' && hit) {
       if (hit.id === selectedPlaceId()) {
         setPendingMove({
@@ -1138,6 +1795,95 @@ const App: Component = () => {
       setDraggingPlaceOnAxis(paPlace.axisId);
       return;
     }
+    // When adding a place on axis, clicking on the axis line (not just the preview) places and starts drag.
+    if (gs === 'execute' && tc === 'addPlaceOnAxis' && paPlace) {
+      const axis = axes().find((a) => a.id === paPlace.axisId);
+      if (axis) {
+        const parentPlace = places().find((p) => p.id === axis.placeId);
+        if (parentPlace) {
+          const placesAbs = placesWithAbsolutePositions();
+          const geom = getAxisWorldGeometry(
+            { id: axis.id, placeId: axis.placeId, angle: Number(axis.angle) },
+            placesAbs,
+          );
+          let d = projectPointOntoAxis(
+            cx,
+            cy,
+            geom.originX,
+            geom.originY,
+            geom.worldAngle,
+          );
+          if (axis.isBidirectional === 0) d = Math.max(0, d);
+          const projX = geom.originX + d * Math.cos(geom.worldAngle);
+          const projY = geom.originY + d * Math.sin(geom.worldAngle);
+          const perpDist = Math.hypot(cx - projX, cy - projY);
+          if (perpDist <= AXIS_HIT_THRESHOLD) {
+            setPendingAddPlaceOnAxis({
+              axisId: paPlace.axisId,
+              distanceAlongAxis: d,
+            });
+            setDraggingPlaceOnAxis(paPlace.axisId);
+            return;
+          }
+        }
+      }
+    }
+
+    const paCf = pendingAddPlaceOnCircularField();
+    if (
+      gs === 'execute' &&
+      tc === 'addPlaceOnCircularField' &&
+      paCf &&
+      hit?.id === PENDING_CIRCULAR_FIELD_PLACE
+    ) {
+      setDraggingPlaceOnCircularField(paCf.circularFieldId);
+      return;
+    }
+    if (gs === 'execute' && tc === 'addPlaceOnCircularField' && paCf) {
+      const cf = circularFieldsWithPositions().find(
+        (c) => c.id === paCf.circularFieldId,
+      );
+      if (cf) {
+        const dist = Math.hypot(cx - cf.centerX, cy - cf.centerY);
+        const r = cf.radius;
+        if (Math.abs(dist - r) <= CIRCULAR_FIELD_HIT_THRESHOLD) {
+          const worldAngle = Math.atan2(cy - cf.centerY, cx - cf.centerX);
+          const parentPlace = places().find((p) => p.id === cf.placeId);
+          if (parentPlace) {
+            const parentAbs = placesWithAbsolutePositions().find(
+              (p) => p.id === parentPlace.id,
+            );
+            if (parentAbs) {
+              const localAngle = worldAngle - parentAbs.absWorldAngle;
+              setPendingAddPlaceOnCircularField({
+                circularFieldId: paCf.circularFieldId,
+                angleOnCircle: localAngle,
+              });
+              setDraggingPlaceOnCircularField(paCf.circularFieldId);
+            }
+          }
+          return;
+        }
+      }
+    }
+
+    const paRep = pendingAddPlaceOnCircularRepeater();
+    if (gs === 'execute' && tc === 'addPlaceOnCircularRepeater' && paRep) {
+      const placesAbs = placesWithAbsolutePositions();
+      const params = repeaterPointToAxisParams(
+        paRep.circularRepeaterId,
+        cx,
+        cy,
+        placesAbs,
+      );
+      setPendingAddPlaceOnCircularRepeater({
+        circularRepeaterId: paRep.circularRepeaterId,
+        distanceAlongAxis: params.distanceAlongAxis,
+        distanceFromAxis: params.distanceFromAxis,
+      });
+      setDraggingPlaceOnCircularRepeater(paRep.circularRepeaterId);
+      return;
+    }
 
     const pa = pendingAddAxis();
     const pmod = pendingModifyAxis();
@@ -1149,9 +1895,17 @@ const App: Component = () => {
     ) {
       const placesAbs = placesWithAbsolutePositions();
       const axisInfo = pa
-        ? { placeId: pa.placeId, angle: pa.angle }
+        ? {
+            placeId: pa.placeId,
+            angle: pa.angle,
+            isBidirectional: pa.isBidirectional,
+          }
         : pmod
-          ? { placeId: pmod.placeId, angle: pmod.angle }
+          ? {
+              placeId: pmod.placeId,
+              angle: pmod.angle,
+              isBidirectional: pmod.isBidirectional,
+            }
           : null;
       if (axisInfo) {
         const geom = getAxisWorldGeometry(
@@ -1175,6 +1929,8 @@ const App: Component = () => {
             geom.originY,
             geom.worldAngle,
             viewport,
+            100,
+            { unidirectional: !axisInfo.isBidirectional },
           );
           const dist = distanceFromPointToSegment(
             cx,
@@ -1277,10 +2033,43 @@ const App: Component = () => {
         const place = placesWithAbsolutePositions().find((p) => p.id === selId);
         if (place) {
           const theta = pendingRotate()?.angle ?? place.absWorldAngle ?? 0;
-          if (isPointNearAxis(cx, cy, place.absX, place.absY, theta)) {
+          const parentAxisId = (place as PlaceLike).parentAxisId;
+          const axis =
+            parentAxisId != null
+              ? axes().find((a) => a.id === parentAxisId)
+              : null;
+          const isRepeaterEcho =
+            axis != null &&
+            (axis as { circularRepeaterId?: CircularRepeaterId })
+              .circularRepeaterId != null;
+          const placesAbs = placesWithAbsolutePositions();
+          const centerPlace =
+            axis != null
+              ? placesAbs.find((p) => p.id === axis.placeId)
+              : null;
+          const radialAngle =
+            isRepeaterEcho && centerPlace != null
+              ? Math.atan2(
+                  place.absY - centerPlace.absY,
+                  place.absX - centerPlace.absX,
+                )
+              : null;
+          const angleForHit = radialAngle ?? theta;
+          const useMathConvention = parentAxisId != null;
+          if (
+            isPointNearAxis(
+              cx,
+              cy,
+              place.absX,
+              place.absY,
+              angleForHit,
+              36,
+              useMathConvention,
+            )
+          ) {
             setPendingRotate({
               placeId: selId,
-              angle: theta,
+              angle: radialAngle ?? theta,
             });
           }
         }
@@ -1436,31 +2225,80 @@ const App: Component = () => {
             { id: axis.id, placeId: axis.placeId, angle: Number(axis.angle) },
             placesAbs,
           );
-          const d = projectPointOntoAxis(
+          let d = projectPointOntoAxis(
             cx,
             cy,
             geom.originX,
             geom.originY,
             geom.worldAngle,
           );
-          setPendingAddPlaceOnAxis({ axisId: dragPlaceOnAxis, distanceAlongAxis: d });
+          if (axis.isBidirectional === 0) d = Math.max(0, d);
+          setPendingAddPlaceOnAxis({
+            axisId: dragPlaceOnAxis,
+            distanceAlongAxis: d,
+          });
         }
       }
     }
 
-    if (draggingAxisAngle() && guideStep() === 'execute' && mode() === 'default') {
+    const dragPlaceOnRep = draggingPlaceOnCircularRepeater();
+    if (dragPlaceOnRep && guideStep() === 'execute' && mode() === 'default') {
+      const paRep = pendingAddPlaceOnCircularRepeater();
+      if (paRep) {
+        const placesAbs = placesWithAbsolutePositions();
+        const params = repeaterPointToAxisParams(
+          paRep.circularRepeaterId,
+          cx,
+          cy,
+          placesAbs,
+        );
+        setPendingAddPlaceOnCircularRepeater({
+          circularRepeaterId: paRep.circularRepeaterId,
+          distanceAlongAxis: params.distanceAlongAxis,
+          distanceFromAxis: params.distanceFromAxis,
+        });
+      }
+    }
+
+    const dragPlaceOnCf = draggingPlaceOnCircularField();
+    if (dragPlaceOnCf && guideStep() === 'execute' && mode() === 'default') {
+      const paCf = pendingAddPlaceOnCircularField();
+      if (paCf) {
+        const cf = circularFieldsWithPositions().find(
+          (c) => c.id === paCf.circularFieldId,
+        );
+        if (cf) {
+          const worldAngle = Math.atan2(cy - cf.centerY, cx - cf.centerX);
+          const parentPlace = places().find((p) => p.id === cf.placeId);
+          if (parentPlace) {
+            const parentAbs = placesWithAbsolutePositions().find(
+              (p) => p.id === parentPlace.id,
+            );
+            if (parentAbs) {
+              const localAngle = worldAngle - parentAbs.absWorldAngle;
+              setPendingAddPlaceOnCircularField({
+                ...paCf,
+                angleOnCircle: localAngle,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (
+      draggingAxisAngle() &&
+      guideStep() === 'execute' &&
+      mode() === 'default'
+    ) {
       const addAx = pendingAddAxis();
       const modAx = pendingModifyAxis();
       const axisInfo = addAx ?? modAx;
       if (axisInfo) {
-        const parentPlace = places().find(
-          (p) => p.id === (addAx ? addAx.placeId : modAx!.placeId),
-        );
+        const parentPlace = places().find((p) => p.id === axisInfo.placeId);
         if (parentPlace) {
           const placesAbs = placesWithAbsolutePositions();
-          const parentAbs = placesAbs.find(
-            (p) => p.id === parentPlace.id,
-          );
+          const parentAbs = placesAbs.find((p) => p.id === parentPlace.id);
           if (parentAbs) {
             const worldAngle = Math.atan2(
               cy - parentAbs.absY,
@@ -1468,12 +2306,20 @@ const App: Component = () => {
             );
             const axisAngle = worldAngle - parentAbs.absWorldAngle;
             if (addAx) {
-              setPendingAddAxis({ placeId: addAx.placeId, angle: axisAngle });
+              setPendingAddAxis({
+                placeId: addAx.placeId,
+                angle: axisAngle,
+                isBidirectional: addAx.isBidirectional,
+                ...(addAx.echoPlaceIds != null && {
+                  echoPlaceIds: addAx.echoPlaceIds,
+                }),
+              });
             } else if (modAx) {
               setPendingModifyAxis({
                 axisId: modAx.axisId,
                 placeId: modAx.placeId,
                 angle: axisAngle,
+                isBidirectional: modAx.isBidirectional,
               });
             }
           }
@@ -1486,12 +2332,16 @@ const App: Component = () => {
         setPendingAdd({ ...pa, x: cx, y: cy });
         setPendingMove({ placeId: 'pending', x: cx, y: cy });
       } else if (
-        transformChoice() === 'move' &&
+        (transformChoice() === 'move' ||
+          transformChoice() === 'modifyPlaceOnCircularRepeater') &&
         pm.placeId !== 'pending' &&
         pm.placeId !== PENDING_SPLIT_PLACE
       ) {
         const place = places().find((p) => p.id === pm.placeId) as
-          | (PlaceLike & { parentAxisId?: AxisId | null })
+          | (PlaceLike & {
+              parentAxisId?: AxisId | null;
+              parentCircularFieldId?: CircularFieldId | null;
+            })
           | undefined;
         if (place?.parentAxisId != null) {
           const axis = axes().find((a) => a.id === place.parentAxisId);
@@ -1507,18 +2357,42 @@ const App: Component = () => {
                 },
                 placesAbs,
               );
-              const d = projectPointOntoAxis(
+              let d = projectPointOntoAxis(
                 cx,
                 cy,
                 geom.originX,
                 geom.originY,
                 geom.worldAngle,
               );
-              const projX =
-                geom.originX + d * Math.cos(geom.worldAngle);
-              const projY =
-                geom.originY + d * Math.sin(geom.worldAngle);
-              setPendingMove({ placeId: pm.placeId, x: projX, y: projY });
+              if (axis.isBidirectional === 0) d = Math.max(0, d);
+              // Use cursor position (cx, cy) so the move can be off-axis; placesWithAbsolutePositions and commit project it to (d, perp) per axis.
+              setPendingMove({ placeId: pm.placeId, x: cx, y: cy });
+            }
+          }
+        } else if (place?.parentCircularFieldId != null) {
+          const cf = circularFieldsWithPositions().find(
+            (c) => c.id === place.parentCircularFieldId,
+          );
+          if (cf) {
+            const worldAngle = Math.atan2(cy - cf.centerY, cx - cf.centerX);
+            const parentPlace = places().find((p) => p.id === cf.placeId);
+            if (parentPlace) {
+              const parentAbs = placesWithAbsolutePositions().find(
+                (p) => p.id === parentPlace.id,
+              );
+              if (parentAbs) {
+                const localAngle = worldAngle - parentAbs.absWorldAngle;
+                const localX = cf.radius * Math.cos(localAngle);
+                const localY = cf.radius * Math.sin(localAngle);
+                const rotated = rotateBy(
+                  parentAbs.absWorldAngle,
+                  localX,
+                  localY,
+                );
+                const projX = cf.centerX + rotated.x;
+                const projY = cf.centerY + rotated.y;
+                setPendingMove({ placeId: pm.placeId, x: projX, y: projY });
+              }
             }
           }
         } else {
@@ -1547,7 +2421,10 @@ const App: Component = () => {
       );
       if (place) {
         const { x: cx, y: cy } = screenToCanvas(e.clientX, e.clientY);
-        const angle = Math.atan2(cx - place.absX, place.absY - cy);
+        const angle =
+          (place as PlaceLike).parentAxisId != null
+            ? Math.atan2(cy - place.absY, cx - place.absX)
+            : Math.atan2(cx - place.absX, place.absY - cy);
         setPendingRotate({ placeId: pr.placeId, angle });
       }
     }
@@ -1565,7 +2442,13 @@ const App: Component = () => {
         const centerY = place?.absY ?? 0;
         const dist = Math.hypot(cx - centerX, cy - centerY);
         const radius = Math.max(CIRCULAR_FIELD_MIN_RADIUS, dist);
-        evolu.update('circularField', { id: draggingCf, radius });
+        if (pac.circularFieldIds != null) {
+          for (const id of pac.circularFieldIds) {
+            evolu.update('circularField', { id, radius });
+          }
+        } else {
+          evolu.update('circularField', { id: draggingCf, radius });
+        }
         setPendingAddCircularField({ ...pac, radius });
       } else if (pmc && pmc.circularFieldId === draggingCf) {
         const place = placesWithAbsolutePositions().find(
@@ -1628,6 +2511,8 @@ const App: Component = () => {
     }
     setDraggingAxisAngle(false);
     setDraggingPlaceOnAxis(null);
+    setDraggingPlaceOnCircularField(null);
+    setDraggingPlaceOnCircularRepeater(null);
     // Bending circle move/radius state is cleared in goToSelectStep on keep/discard
     // so hasChanges stays true after drag ends and keep/discard remain enabled.
   };
@@ -1692,12 +2577,22 @@ const App: Component = () => {
       setPendingModifyAxis(null);
       setPendingDeleteAxisId(null);
       setPendingAddPlaceOnAxis(null);
+      setPendingAddPlaceOnCircularField(null);
+      setDraggingPlaceOnCircularField(null);
+      setPendingAddCircularRepeater(null);
+      setPendingModifyCircularRepeater(null);
+      setPendingAddPlaceOnCircularRepeater(null);
+      setPendingModifyPlaceOnCircularRepeater(null);
+      setPendingDeleteCircularRepeaterId(null);
+      setDraggingPlaceOnCircularRepeater(null);
       setSelectedPlaceId(null);
       setSelectedLineSegmentId(null);
       setSelectedCircularFieldId(null);
       setSelectedBendingCircularFieldId(null);
       setSelectedAxisId(null);
+      setSelectedCircularRepeaterId(null);
       setHasDrawingPaneSelected(false);
+      setLastCursorCanvas(null);
     });
   };
 
@@ -1756,18 +2651,54 @@ const App: Component = () => {
       } else {
         const placeId = selectedPlaceId();
         if (placeId) {
-          const r = evolu.insert('circularField', {
-            placeId,
-            radius: CIRCULAR_FIELD_DEFAULT_RADIUS,
-          });
-          if (r.ok) {
-            setPendingAddCircularField({
-              stage: 'editing',
+          const place = places().find((p) => p.id === placeId) as
+            | PlaceLike
+            | undefined;
+          const groupId = place?.repeaterEchoGroupId;
+          if (groupId != null) {
+            const echoPlaces = places().filter(
+              (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
+            );
+            const circularFieldIds: CircularFieldId[] = [];
+            let firstPlaceId: PlaceId | null = null;
+            let firstCfId: CircularFieldId | null = null;
+            for (const echo of echoPlaces) {
+              const r = evolu.insert('circularField', {
+                placeId: echo.id,
+                radius: CIRCULAR_FIELD_DEFAULT_RADIUS,
+              });
+              if (r.ok) {
+                circularFieldIds.push(r.value.id);
+                if (firstPlaceId == null) {
+                  firstPlaceId = echo.id;
+                  firstCfId = r.value.id;
+                }
+              }
+            }
+            if (firstPlaceId != null && firstCfId != null) {
+              setPendingAddCircularField({
+                stage: 'editing',
+                placeId: firstPlaceId,
+                circularFieldId: firstCfId,
+                radius: CIRCULAR_FIELD_DEFAULT_RADIUS,
+                isNewPlace: false,
+                circularFieldIds,
+              });
+            }
+          } else {
+            const r = evolu.insert('circularField', {
               placeId,
-              circularFieldId: r.value.id,
               radius: CIRCULAR_FIELD_DEFAULT_RADIUS,
-              isNewPlace: false,
             });
+            if (r.ok) {
+              setPendingAddCircularField({
+                stage: 'editing',
+                placeId,
+                circularFieldId: r.value.id,
+                radius: CIRCULAR_FIELD_DEFAULT_RADIUS,
+                isNewPlace: false,
+              });
+            }
           }
         }
       }
@@ -1775,7 +2706,24 @@ const App: Component = () => {
     if (choice === 'addAxis') {
       const placeId = selectedPlaceId();
       if (placeId) {
-        setPendingAddAxis({ placeId, angle: 0 });
+        const place = places().find((p) => p.id === placeId) as
+          | PlaceLike
+          | undefined;
+        const groupId = place?.repeaterEchoGroupId;
+        if (groupId != null) {
+          const echoPlaces = places().filter(
+            (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
+          );
+          const echoPlaceIds = echoPlaces.map((p) => p.id);
+          setPendingAddAxis({
+            placeId: echoPlaceIds[0] ?? placeId,
+            angle: 0,
+            isBidirectional: true,
+            echoPlaceIds,
+          });
+        } else {
+          setPendingAddAxis({ placeId, angle: 0, isBidirectional: true });
+        }
       }
     }
     if (choice === 'modifyAxis') {
@@ -1787,12 +2735,14 @@ const App: Component = () => {
             axisId,
             placeId: axis.placeId,
             angle: Number(axis.angle),
+            isBidirectional: axis.isBidirectional !== 0,
           });
         }
       }
     }
-    if (choice === 'deleteAxis' && selectedAxisId()) {
-      setPendingDeleteAxisId(selectedAxisId()!);
+    const axisId = selectedAxisId();
+    if (choice === 'deleteAxis' && axisId) {
+      setPendingDeleteAxisId(axisId);
     }
     if (choice === 'addPlaceOnAxis') {
       const axisId = selectedAxisId();
@@ -1800,16 +2750,73 @@ const App: Component = () => {
         setPendingAddPlaceOnAxis({ axisId, distanceAlongAxis: 0 });
       }
     }
+    if (choice === 'addPlaceOnCircularField') {
+      const cfId = selectedCircularFieldId();
+      if (cfId) {
+        setPendingAddPlaceOnCircularField({
+          circularFieldId: cfId,
+          angleOnCircle: 0,
+        });
+      }
+    }
+    if (choice === 'addCircularRepeater') {
+      const placeId = selectedPlaceId();
+      if (placeId) {
+        setPendingAddCircularRepeater({ placeId, count: 4 });
+      }
+    }
+    if (choice === 'modifyCircularRepeater') {
+      const repeaterId = selectedCircularRepeaterId();
+      if (repeaterId) {
+        const repeater = circularRepeaters().find((r) => r.id === repeaterId);
+        if (repeater) {
+          setPendingModifyCircularRepeater({
+            circularRepeaterId: repeaterId,
+            count: Number(repeater.count),
+          });
+        }
+      }
+    }
+    if (choice === 'deleteCircularRepeater' && selectedCircularRepeaterId()) {
+      setPendingDeleteCircularRepeaterId(selectedCircularRepeaterId());
+    }
+    if (choice === 'addPlaceOnCircularRepeater') {
+      const repeaterId = selectedCircularRepeaterId();
+      if (repeaterId) {
+        setPendingAddPlaceOnCircularRepeater({
+          circularRepeaterId: repeaterId,
+          distanceAlongAxis: 0,
+        });
+      }
+    }
+    if (choice === 'modifyPlaceOnCircularRepeater') {
+      const placeId = selectedPlaceId();
+      if (placeId) {
+        const place = places().find((p) => p.id === placeId) as
+          | PlaceLike
+          | undefined;
+        const axisId = place?.parentAxisId;
+        if (axisId) {
+          const axis = axes().find((a) => a.id === axisId);
+          const repId = axis
+            ? (axis as { circularRepeaterId?: CircularRepeaterId })
+                .circularRepeaterId
+            : null;
+          if (repId) {
+            setPendingModifyPlaceOnCircularRepeater({
+              placeId,
+              circularRepeaterId: repId,
+            });
+          }
+        }
+      }
+    }
     if (choice === 'splitLine') {
       const segId = selectedLineSegmentId();
       if (segId) {
         const seg = lineSegments().find((s) => s.id === segId);
         const ends = lineSegmentEnds();
-        if (
-          seg &&
-          seg.endAId != null &&
-          seg.endBId != null
-        ) {
+        if (seg && seg.endAId != null && seg.endBId != null) {
           const endA = ends.find((e) => e.id === seg.endAId);
           const endB = ends.find((e) => e.id === seg.endBId);
           if (endA?.placeId != null && endB?.placeId != null) {
@@ -1827,12 +2834,8 @@ const App: Component = () => {
             const segPos = lineSegmentsWithPositions().find(
               (s) => s.id === segId,
             );
-            const previewX = segPos
-              ? (segPos.x1 + segPos.x2) / 2
-              : 0;
-            const previewY = segPos
-              ? (segPos.y1 + segPos.y2) / 2
-              : 0;
+            const previewX = segPos ? (segPos.x1 + segPos.x2) / 2 : 0;
+            const previewY = segPos ? (segPos.y1 + segPos.y2) / 2 : 0;
             setPendingSplitLine({
               segmentId: segId,
               placeAId,
@@ -1874,11 +2877,19 @@ const App: Component = () => {
     setPendingModifyAxis(null);
     setPendingDeleteAxisId(null);
     setPendingAddPlaceOnAxis(null);
+    setPendingAddPlaceOnCircularField(null);
+    setDraggingPlaceOnCircularField(null);
+    setPendingAddCircularRepeater(null);
+    setPendingModifyCircularRepeater(null);
+    setPendingAddPlaceOnCircularRepeater(null);
+    setPendingDeleteCircularRepeaterId(null);
+    setDraggingPlaceOnCircularRepeater(null);
     setSelectedPlaceId(null);
     setSelectedLineSegmentId(null);
     setSelectedCircularFieldId(null);
     setSelectedBendingCircularFieldId(null);
     setSelectedAxisId(null);
+    setSelectedCircularRepeaterId(null);
     setHasDrawingPaneSelected(false);
   };
 
@@ -1888,6 +2899,7 @@ const App: Component = () => {
     setSelectedCircularFieldId(null);
     setSelectedBendingCircularFieldId(null);
     setSelectedAxisId(null);
+    setSelectedCircularRepeaterId(null);
     setHasDrawingPaneSelected(false);
     setTransformChoice(null);
     setGuideStep('select');
@@ -1904,6 +2916,7 @@ const App: Component = () => {
     if (add) {
       let x = add.x;
       let y = add.y;
+      let didMultiAddRelated = false;
       if (add.parentId) {
         const parent = placesList.find((p) => p.id === add.parentId);
         if (parent) {
@@ -1919,35 +2932,81 @@ const App: Component = () => {
           );
           x = local.x;
           y = local.y;
+          const groupId = (parent as PlaceLike).repeaterEchoGroupId;
+          if (groupId != null) {
+            const echoPlaces = placesList.filter(
+              (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
+            );
+            let firstPlaceId: PlaceId | null = null;
+            let namesList: ReadonlyArray<{ name: string | null }> =
+              placesList.map((p) => ({ name: p.name ?? null }));
+            for (const echo of echoPlaces) {
+              const defaultName = nextPlaceName(namesList);
+              const nameResult = String1000.from(defaultName);
+              const r = evolu.insert('place', {
+                parentId: echo.id,
+                x,
+                y,
+                ...(firstPlaceId != null && {
+                  repeaterEchoGroupId: firstPlaceId,
+                }),
+                ...(nameResult.ok && { name: nameResult.value }),
+                isScaffolding: 1,
+              });
+              if (r.ok) {
+                if (firstPlaceId == null) firstPlaceId = r.value.id;
+                namesList = [
+                  ...namesList,
+                  { name: nameResult.ok ? defaultName : null },
+                ];
+                recordTransformation({
+                  kind: 'addRelated',
+                  placeId: r.value.id,
+                  parentId: echo.id,
+                  x,
+                  y,
+                });
+              }
+            }
+            if (firstPlaceId != null) {
+              evolu.update('place', {
+                id: firstPlaceId,
+                repeaterEchoGroupId: firstPlaceId,
+              });
+            }
+            didMultiAddRelated = true;
+          }
         }
       }
-      const defaultName = nextPlaceName(placesList);
-      const nameResult = String1000.from(defaultName);
-      const r = evolu.insert('place', {
-        parentId: add.parentId,
-        x,
-        y,
-        ...(nameResult.ok && { name: nameResult.value }),
-        isScaffolding: 1,
-      });
-      if (r.ok) {
-        insertedPlaceId = r.value.id;
-        if (add.parentId != null) {
-          recordTransformation({
-            kind: 'addRelated',
-            placeId: r.value.id,
-            parentId: add.parentId,
-            x,
-            y,
-          });
-        } else {
-          recordTransformation({
-            kind: 'add',
-            placeId: r.value.id,
-            parentId: null,
-            x,
-            y,
-          });
+      if (!didMultiAddRelated) {
+        const defaultName = nextPlaceName(placesList);
+        const nameResult = String1000.from(defaultName);
+        const r = evolu.insert('place', {
+          parentId: add.parentId,
+          x,
+          y,
+          ...(nameResult.ok && { name: nameResult.value }),
+          isScaffolding: 1,
+        });
+        if (r.ok) {
+          insertedPlaceId = r.value.id;
+          if (add.parentId != null) {
+            recordTransformation({
+              kind: 'addRelated',
+              placeId: r.value.id,
+              parentId: add.parentId,
+              x,
+              y,
+            });
+          } else {
+            recordTransformation({
+              kind: 'add',
+              placeId: r.value.id,
+              parentId: null,
+              x,
+              y,
+            });
+          }
         }
       }
       setPendingAdd(null);
@@ -1968,118 +3027,281 @@ const App: Component = () => {
             const parentPlace = placesList.find((p) => p.id === axis.placeId);
             if (parentPlace) {
               const parentRes = getAbsolutePosition(parentPlace, placesList);
-              const worldAngle =
-                parentRes.worldAngle + Number(axis.angle);
-              const d = projectPointOntoAxis(
+              const worldAngle = parentRes.worldAngle + Number(axis.angle);
+              let d = projectPointOntoAxis(
                 move.x,
                 move.y,
                 parentRes.x,
                 parentRes.y,
                 worldAngle,
               );
-              evolu.update('place', {
-                id: placeId,
-                distanceAlongAxis: d,
-              });
-              recordTransformation({
-                kind: 'move',
-                placeId,
-                parentId: null,
-                x: move.x,
-                y: move.y,
-              });
+              if (axis.isBidirectional === 0) d = Math.max(0, d);
+              const cosA = Math.cos(worldAngle);
+              const sinA = Math.sin(worldAngle);
+              const perp =
+                (move.x - (parentRes.x + d * cosA)) * -sinA +
+                (move.y - (parentRes.y + d * sinA)) * cosA;
+              const groupId = (place as PlaceLike).repeaterEchoGroupId;
+              const toUpdate =
+                groupId != null
+                  ? placesList.filter(
+                      (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
+                    )
+                  : [place];
+              const paModRep = pendingModifyPlaceOnCircularRepeater();
+              for (const p of toUpdate) {
+                if (p && (p as PlaceLike).parentAxisId != null) {
+                  evolu.update('place', {
+                    id: p.id,
+                    distanceAlongAxis: d,
+                    distanceFromAxis: perp,
+                  });
+                }
+              }
+              if (paModRep && paModRep.placeId === placeId) {
+                recordTransformation({
+                  kind: 'modifyPlaceOnCircularRepeater',
+                  placeId,
+                  circularRepeaterId: paModRep.circularRepeaterId,
+                  distanceAlongAxis: d,
+                  distanceFromAxis: perp,
+                });
+                setPendingModifyPlaceOnCircularRepeater(null);
+              } else {
+                recordTransformation({
+                  kind: 'move',
+                  placeId,
+                  parentId: null,
+                  x: move.x,
+                  y: move.y,
+                });
+              }
             }
           }
         } else {
-          let x = move.x;
-          let y = move.y;
-          const parentIdForMove =
-            place?.parentId ??
-            (add && move.placeId === 'pending' ? add.parentId : null);
-          if (parentIdForMove) {
-            const parent = placesList.find((p) => p.id === parentIdForMove);
-            if (parent) {
-              const parentRes = getAbsolutePosition(parent, placesList);
-              const worldOffset = {
-                x: move.x - parentRes.x,
-                y: move.y - parentRes.y,
-              };
-              const local = rotateBy(
-                -parentRes.worldAngle,
-                worldOffset.x,
-                worldOffset.y,
-              );
-              x = local.x;
-              y = local.y;
+          const placeOnCf =
+            place &&
+            (place as PlaceLike).parentCircularFieldId != null &&
+            (place as PlaceLike).parentCircularFieldId;
+          if (placeOnCf) {
+            const cf = circularFields().find((c) => c.id === placeOnCf);
+            if (cf) {
+              const parentPlace = placesList.find((p) => p.id === cf.placeId);
+              if (parentPlace) {
+                const parentRes = getAbsolutePosition(parentPlace, placesList);
+                const worldAngle = Math.atan2(
+                  move.y - parentRes.y,
+                  move.x - parentRes.x,
+                );
+                const localAngle = worldAngle - parentRes.worldAngle;
+                evolu.update('place', {
+                  id: placeId,
+                  angleOnCircle: localAngle,
+                });
+                recordTransformation({
+                  kind: 'move',
+                  placeId,
+                  parentId: null,
+                  x: move.x,
+                  y: move.y,
+                });
+              }
             }
+          } else {
+            let x = move.x;
+            let y = move.y;
+            const parentIdForMove =
+              place?.parentId ??
+              (add && move.placeId === 'pending' ? add.parentId : null);
+            if (parentIdForMove) {
+              const parent = placesList.find((p) => p.id === parentIdForMove);
+              if (parent) {
+                const parentRes = getAbsolutePosition(parent, placesList);
+                const worldOffset = {
+                  x: move.x - parentRes.x,
+                  y: move.y - parentRes.y,
+                };
+                const local = rotateBy(
+                  -parentRes.worldAngle,
+                  worldOffset.x,
+                  worldOffset.y,
+                );
+                x = local.x;
+                y = local.y;
+              }
+            }
+            evolu.update('place', {
+              id: placeId,
+              x,
+              y,
+            });
+            recordTransformation({
+              kind: 'move',
+              placeId,
+              parentId: parentIdForMove,
+              x,
+              y,
+            });
           }
-          evolu.update('place', {
-            id: placeId,
-            x,
-            y,
-          });
-          recordTransformation({
-            kind: 'move',
-            placeId,
-            parentId: parentIdForMove,
-            x,
-            y,
-          });
         }
       }
       setPendingMove(null);
     }
 
     if (del) {
-      evolu.update('place', { id: del, isDeleted: true });
-      recordTransformation({ kind: 'delete', placeId: del });
+      const delPlace = placesList.find((p) => p.id === del) as
+        | PlaceLike
+        | undefined;
+      const groupId = delPlace?.repeaterEchoGroupId;
+      const toDelete =
+        groupId != null
+          ? placesList.filter(
+              (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
+            )
+          : [placesList.find((p) => p.id === del)].filter(Boolean);
+      for (const p of toDelete) {
+        if (p) {
+          evolu.update('place', { id: p.id, isDeleted: true });
+          recordTransformation({ kind: 'delete', placeId: p.id });
+        }
+      }
       setPendingDeletePlaceId(null);
     }
 
     if (rot) {
       const rotatedPlace = placesList.find((p) => p.id === rot.placeId);
-      let storedAngle = rot.angle;
-      if (rotatedPlace?.parentId) {
-        const parent = placesList.find((p) => p.id === rotatedPlace.parentId);
-        if (parent) {
-          const parentRes = getAbsolutePosition(parent, placesList);
-          storedAngle = rot.angle - parentRes.worldAngle;
+      const groupId = (rotatedPlace as PlaceLike)?.repeaterEchoGroupId;
+      const toRotate =
+        groupId != null
+          ? placesList.filter(
+              (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
+            )
+          : rotatedPlace
+            ? [rotatedPlace]
+            : [];
+      const rotatedPlaceUnrotated =
+        rotatedPlace != null
+          ? getAbsolutePosition(
+              rotatedPlace,
+              placesList,
+              null as unknown as typeof moveOverride,
+              null,
+            ).worldAngle
+          : rot.angle;
+      const delta = rot.angle - rotatedPlaceUnrotated;
+      for (const p of toRotate) {
+        let storedAngle: number;
+        if (groupId != null) {
+          const pUnrotated = getAbsolutePosition(
+            p,
+            placesList,
+            null as unknown as typeof moveOverride,
+            null,
+          ).worldAngle;
+          const axis = (p as PlaceLike).parentAxisId != null
+            ? axes().find(
+                (a) => a.id === (p as PlaceLike).parentAxisId,
+              )
+            : null;
+          const parent = axis
+            ? placesList.find((pl) => pl.id === axis.placeId)
+            : null;
+          if (axis && parent) {
+            const parentRes = getAbsolutePosition(
+              parent,
+              placesList,
+              null as unknown as typeof moveOverride,
+              null,
+            );
+            const baseAxisAngle =
+              parentRes.worldAngle + Number(axis.angle);
+            storedAngle = (pUnrotated + delta) - baseAxisAngle;
+          } else {
+            storedAngle = ((p as PlaceLike).angle ?? 0) + delta;
+          }
+        } else if ((p as PlaceLike).parentAxisId != null) {
+          const axis = axes().find(
+            (a) => a.id === (p as PlaceLike).parentAxisId,
+          );
+          const parent = axis
+            ? placesList.find((pl) => pl.id === axis.placeId)
+            : null;
+          if (axis && parent) {
+            const parentRes = getAbsolutePosition(
+              parent,
+              placesList,
+              null as unknown as typeof moveOverride,
+              null,
+            );
+            storedAngle =
+              rot.angle - (parentRes.worldAngle + Number(axis.angle));
+          } else {
+            storedAngle = rot.angle;
+          }
+        } else if (p.parentId != null) {
+          const parent = placesList.find((pl) => pl.id === p.parentId);
+          if (parent) {
+            const parentRes = getAbsolutePosition(
+              parent,
+              placesList,
+              null as unknown as typeof moveOverride,
+              null,
+            );
+            storedAngle = rot.angle - parentRes.worldAngle;
+          } else {
+            storedAngle = rot.angle;
+          }
+        } else {
+          storedAngle = rot.angle;
         }
+        evolu.update('place', { id: p.id, angle: storedAngle });
+        recordTransformation({
+          kind: 'rotate',
+          placeId: p.id,
+          angle: storedAngle,
+        });
       }
-      evolu.update('place', { id: rot.placeId, angle: storedAngle });
-      recordTransformation({
-        kind: 'rotate',
-        placeId: rot.placeId,
-        angle: storedAngle,
-      });
       setPendingRotate(null);
     }
 
     const addAx = pendingAddAxis();
     if (addAx) {
-      const axisRes = evolu.insert('axis', {
-        placeId: addAx.placeId,
-        angle: addAx.angle,
-      });
-      if (axisRes.ok) {
-        recordTransformation({
-          kind: 'addAxis',
-          placeId: addAx.placeId,
-          axisId: axisRes.value.id,
+      const placeIds =
+        addAx.echoPlaceIds != null && addAx.echoPlaceIds.length > 0
+          ? addAx.echoPlaceIds
+          : [addAx.placeId];
+      for (const pid of placeIds) {
+        const axisRes = evolu.insert('axis', {
+          placeId: pid,
           angle: addAx.angle,
+          isBidirectional: addAx.isBidirectional ? 1 : 0,
         });
+        if (axisRes.ok) {
+          recordTransformation({
+            kind: 'addAxis',
+            placeId: pid,
+            axisId: axisRes.value.id,
+            angle: addAx.angle,
+            isBidirectional: addAx.isBidirectional ? 1 : 0,
+          });
+        }
       }
       setPendingAddAxis(null);
     }
 
     const modAx = pendingModifyAxis();
     if (modAx) {
-      evolu.update('axis', { id: modAx.axisId, angle: modAx.angle });
+      evolu.update('axis', {
+        id: modAx.axisId,
+        angle: modAx.angle,
+        isBidirectional: modAx.isBidirectional ? 1 : 0,
+      });
       recordTransformation({
         kind: 'modifyAxis',
         placeId: modAx.placeId,
         axisId: modAx.axisId,
         angle: modAx.angle,
+        isBidirectional: modAx.isBidirectional ? 1 : 0,
       });
       setPendingModifyAxis(null);
     }
@@ -2120,6 +3342,204 @@ const App: Component = () => {
         });
       }
       setPendingAddPlaceOnAxis(null);
+    }
+
+    const addPlaceOnCf = pendingAddPlaceOnCircularField();
+    if (addPlaceOnCf) {
+      const defaultName = nextPlaceName(placesList);
+      const nameResult = String1000.from(defaultName);
+      const placeRes = evolu.insert('place', {
+        parentId: null,
+        parentAxisId: null,
+        parentCircularFieldId: addPlaceOnCf.circularFieldId,
+        angleOnCircle: addPlaceOnCf.angleOnCircle,
+        x: 0,
+        y: 0,
+        ...(nameResult.ok && { name: nameResult.value }),
+        isScaffolding: 1,
+      });
+      if (placeRes.ok) {
+        recordTransformation({
+          kind: 'addPlaceOnCircularField',
+          placeId: placeRes.value.id,
+          circularFieldId: addPlaceOnCf.circularFieldId,
+          angleOnCircle: addPlaceOnCf.angleOnCircle,
+        });
+      }
+      setPendingAddPlaceOnCircularField(null);
+    }
+
+    const addRep = pendingAddCircularRepeater();
+    if (addRep) {
+      const count = Math.max(2, Math.min(24, Math.round(addRep.count)));
+      const repRes = evolu.insert('circularRepeater', {
+        placeId: addRep.placeId,
+        count,
+      });
+      if (repRes.ok) {
+        const repId = repRes.value.id;
+        for (let k = 0; k < count; k++) {
+          const angle = (2 * Math.PI * k) / count;
+          evolu.insert('axis', {
+            placeId: addRep.placeId,
+            angle,
+            isBidirectional: 0,
+            circularRepeaterId: repId,
+          });
+        }
+        recordTransformation({
+          kind: 'addCircularRepeater',
+          placeId: addRep.placeId,
+          circularRepeaterId: repId,
+          count,
+        });
+      }
+      setPendingAddCircularRepeater(null);
+    }
+
+    const modRep = pendingModifyCircularRepeater();
+    if (modRep) {
+      const repeater = circularRepeaters().find(
+        (r) => r.id === modRep.circularRepeaterId,
+      );
+      if (repeater) {
+        const oldCount = Number(repeater.count);
+        const newCount = Math.max(2, Math.min(24, Math.round(modRep.count)));
+        const repAxes = axes().filter(
+          (a) =>
+            (a as { circularRepeaterId?: CircularRepeaterId })
+              .circularRepeaterId === modRep.circularRepeaterId,
+        );
+        if (newCount > oldCount) {
+          // Map existing axes to the nearest slots in the newCount grid, then add axes for unassigned slots.
+          // Sort by angle so k-th axis maps to slot round(k*newCount/oldCount) % newCount.
+          const sorted = [...repAxes].sort(
+            (a, b) => Number(a.angle) - Number(b.angle),
+          );
+          const assigned = new Set<number>();
+          for (let k = 0; k < sorted.length; k++) {
+            const j = Math.round((k * newCount) / oldCount) % newCount;
+            const slot = (j + newCount) % newCount;
+            assigned.add(slot);
+            const angle = (2 * Math.PI * slot) / newCount;
+            const ax = sorted[k];
+            if (ax) evolu.update('axis', { id: ax.id, angle });
+          }
+          for (let j = 0; j < newCount; j++) {
+            if (assigned.has(j)) continue;
+            const angle = (2 * Math.PI * j) / newCount;
+            evolu.insert('axis', {
+              placeId: repeater.placeId,
+              angle,
+              isBidirectional: 0,
+              circularRepeaterId: modRep.circularRepeaterId,
+            });
+          }
+        } else if (newCount < oldCount) {
+          const sorted = [...repAxes].sort(
+            (a, b) => Number(a.angle) - Number(b.angle),
+          );
+          const toRemove = sorted.slice(newCount);
+          const placesOnRemoved = placesList.filter(
+            (p) =>
+              (p as PlaceLike).parentAxisId != null &&
+              toRemove.some((ax) => ax.id === (p as PlaceLike).parentAxisId),
+          );
+          if (placesOnRemoved.length === 0) {
+            for (const ax of toRemove) {
+              evolu.update('axis', { id: ax.id, isDeleted: true });
+            }
+            // Update kept axes to evenly spaced angles 2π*k/newCount
+            const toKeep = sorted.slice(0, newCount);
+            for (let k = 0; k < toKeep.length; k++) {
+              const angle = (2 * Math.PI * k) / newCount;
+              const ax = toKeep[k];
+              if (ax) evolu.update('axis', { id: ax.id, angle });
+            }
+          }
+        }
+        evolu.update('circularRepeater', {
+          id: modRep.circularRepeaterId,
+          count: newCount,
+        });
+        recordTransformation({
+          kind: 'modifyCircularRepeater',
+          placeId: repeater.placeId,
+          circularRepeaterId: modRep.circularRepeaterId,
+          count: newCount,
+        });
+      }
+      setPendingModifyCircularRepeater(null);
+    }
+
+    const delRepId = pendingDeleteCircularRepeaterId();
+    if (delRepId) {
+      const repeater = circularRepeaters().find((r) => r.id === delRepId);
+      if (repeater) {
+        const repAxes = axes().filter(
+          (a) =>
+            (a as { circularRepeaterId?: CircularRepeaterId })
+              .circularRepeaterId === delRepId,
+        );
+        for (const ax of repAxes) {
+          evolu.update('axis', { id: ax.id, isDeleted: true });
+        }
+        evolu.update('circularRepeater', { id: delRepId, isDeleted: true });
+        recordTransformation({
+          kind: 'deleteCircularRepeater',
+          placeId: repeater.placeId,
+          circularRepeaterId: delRepId,
+        });
+      }
+      setPendingDeleteCircularRepeaterId(null);
+    }
+
+    const addPlaceOnRep = pendingAddPlaceOnCircularRepeater();
+    if (addPlaceOnRep) {
+      const repAxes = axes().filter(
+        (a) =>
+          (a as { circularRepeaterId?: CircularRepeaterId })
+            .circularRepeaterId === addPlaceOnRep.circularRepeaterId,
+      );
+      const distanceFromAxis = addPlaceOnRep.distanceFromAxis ?? 0;
+      let namesList: ReadonlyArray<{ name: string | null }> = placesList;
+      let firstPlaceId: PlaceId | null = null;
+      for (const axis of repAxes) {
+        const defaultName = nextPlaceName(namesList);
+        const nameResult = String1000.from(defaultName);
+        const placeRes: { ok: true; value: { id: PlaceId } } | { ok: false } =
+          evolu.insert('place', {
+            parentId: null,
+            parentAxisId: axis.id,
+            distanceAlongAxis: addPlaceOnRep.distanceAlongAxis,
+            distanceFromAxis,
+            x: 0,
+            y: 0,
+            ...(firstPlaceId != null && { repeaterEchoGroupId: firstPlaceId }),
+            ...(nameResult.ok && { name: nameResult.value }),
+            isScaffolding: 1,
+          });
+        if (placeRes.ok) {
+          if (firstPlaceId == null) firstPlaceId = placeRes.value.id;
+          namesList = [
+            ...namesList,
+            { name: nameResult.ok ? defaultName : null },
+          ];
+        }
+      }
+      if (firstPlaceId != null) {
+        evolu.update('place', {
+          id: firstPlaceId,
+          repeaterEchoGroupId: firstPlaceId,
+        });
+        recordTransformation({
+          kind: 'addPlaceOnCircularRepeater',
+          circularRepeaterId: addPlaceOnRep.circularRepeaterId,
+          placeId: firstPlaceId,
+          distanceAlongAxis: addPlaceOnRep.distanceAlongAxis,
+        });
+      }
+      setPendingAddPlaceOnCircularRepeater(null);
     }
 
     const delLine = pendingDeleteLineId();
@@ -2171,9 +3591,10 @@ const App: Component = () => {
         placeName,
       );
       const name1 = nextLineSegmentName(lineSegments());
-      const name2 = nextLineSegmentName(
-        lineSegments().concat([{ name: name1 }]),
-      );
+      const name2 = nextLineSegmentName([
+        ...lineSegments().map((s) => ({ name: s.name })),
+        { name: name1 },
+      ]);
       // Task 1: insert place only so the worker applies it before task 2.
       setTimeout(() => {
         const placeRes = evolu.insert('place', {
@@ -2268,29 +3689,46 @@ const App: Component = () => {
 
     const pac = pendingAddCircularField();
     if (pac?.stage === 'editing') {
-      evolu.update('circularField', {
-        id: pac.circularFieldId,
-        radius: pac.radius,
-      });
-      if (pac.isNewPlace) {
-        const move = pendingMove();
-        const place = placesList.find((p) => p.id === pac.placeId);
-        const finalX = move?.placeId === pac.placeId ? move.x : (place?.x ?? 0);
-        const finalY = move?.placeId === pac.placeId ? move.y : (place?.y ?? 0);
+      if (pac.circularFieldIds != null && pac.circularFieldIds.length > 0) {
+        for (const cfId of pac.circularFieldIds) {
+          evolu.update('circularField', { id: cfId, radius: pac.radius });
+          const cf = circularFields().find((c) => c.id === cfId);
+          if (cf?.placeId != null) {
+            recordTransformation({
+              kind: 'addCircularField',
+              placeId: cf.placeId,
+              circularFieldId: cfId,
+              radius: pac.radius,
+            });
+          }
+        }
+      } else {
+        evolu.update('circularField', {
+          id: pac.circularFieldId,
+          radius: pac.radius,
+        });
+        if (pac.isNewPlace) {
+          const move = pendingMove();
+          const place = placesList.find((p) => p.id === pac.placeId);
+          const finalX =
+            move?.placeId === pac.placeId ? move.x : (place?.x ?? 0);
+          const finalY =
+            move?.placeId === pac.placeId ? move.y : (place?.y ?? 0);
+          recordTransformation({
+            kind: 'add',
+            placeId: pac.placeId,
+            parentId: null,
+            x: finalX,
+            y: finalY,
+          });
+        }
         recordTransformation({
-          kind: 'add',
+          kind: 'addCircularField',
           placeId: pac.placeId,
-          parentId: null,
-          x: finalX,
-          y: finalY,
+          circularFieldId: pac.circularFieldId,
+          radius: pac.radius,
         });
       }
-      recordTransformation({
-        kind: 'addCircularField',
-        placeId: pac.placeId,
-        circularFieldId: pac.circularFieldId,
-        radius: pac.radius,
-      });
       setPendingAddCircularField(null);
     }
 
@@ -2325,7 +3763,9 @@ const App: Component = () => {
       if (bf) {
         const end = lineSegmentEnds().find((e) => e.id === bf.lineSegmentEndId);
         const seg = lineSegments().find(
-          (s) => s.endAId === bf.lineSegmentEndId || s.endBId === bf.lineSegmentEndId,
+          (s) =>
+            s.endAId === bf.lineSegmentEndId ||
+            s.endBId === bf.lineSegmentEndId,
         );
         if (end?.placeId != null && seg) {
           recordTransformation({
@@ -2345,7 +3785,9 @@ const App: Component = () => {
       if (bf) {
         const end = lineSegmentEnds().find((e) => e.id === bf.lineSegmentEndId);
         const seg = lineSegments().find(
-          (s) => s.endAId === bf.lineSegmentEndId || s.endBId === bf.lineSegmentEndId,
+          (s) =>
+            s.endAId === bf.lineSegmentEndId ||
+            s.endBId === bf.lineSegmentEndId,
         );
         if (end?.placeId != null && seg) {
           recordTransformation({
@@ -2365,7 +3807,9 @@ const App: Component = () => {
       if (bf?.lineSegmentEndId != null) {
         const end = lineSegmentEnds().find((e) => e.id === bf.lineSegmentEndId);
         const seg = lineSegments().find(
-          (s) => s.endAId === bf.lineSegmentEndId || s.endBId === bf.lineSegmentEndId,
+          (s) =>
+            s.endAId === bf.lineSegmentEndId ||
+            s.endBId === bf.lineSegmentEndId,
         );
         if (end?.placeId != null && seg) {
           recordTransformation({
@@ -2445,6 +3889,26 @@ const App: Component = () => {
     for (const t of transformationsRows()) {
       evolu.update('transformation', { id: t.id, isDeleted: true });
     }
+    for (const a of axes()) {
+      evolu.update('axis', { id: a.id, isDeleted: true });
+    }
+    for (const c of circularFields()) {
+      evolu.update('circularField', { id: c.id, isDeleted: true });
+    }
+    for (const r of circularRepeaters()) {
+      const repAxes = axes().filter(
+        (a) =>
+          (a as { circularRepeaterId?: CircularRepeaterId })
+            .circularRepeaterId === r.id,
+      );
+      for (const ax of repAxes) {
+        evolu.update('axis', { id: ax.id, isDeleted: true });
+      }
+      evolu.update('circularRepeater', { id: r.id, isDeleted: true });
+    }
+    for (const b of bendingCircularFields()) {
+      evolu.update('bendingCircularField', { id: b.id, isDeleted: true });
+    }
     resetGuide();
     resetZoom();
   };
@@ -2516,15 +3980,24 @@ const App: Component = () => {
     () => svg,
     'pointermove',
     (e) => {
+      const gs = guideStep();
+      const tc = transformChoice();
+      const { x: cx, y: cy } = screenToCanvas(e.clientX, e.clientY);
       const pal = pendingAddLine();
-      if (
-        pal &&
-        guideStep() === 'execute' &&
-        transformChoice() === 'addLine' &&
-        mode() === 'default'
-      ) {
-        const { x: cx, y: cy } = screenToCanvas(e.clientX, e.clientY);
+      if (pal && gs === 'execute' && tc === 'addLine' && mode() === 'default') {
         setPendingAddLine({ ...pal, cursorX: cx, cursorY: cy });
+      }
+      if (
+        gs === 'execute' &&
+        (tc === 'rotate' ||
+          tc === 'addAxis' ||
+          tc === 'modifyAxis' ||
+          tc === 'move' ||
+          tc === 'modifyPlaceOnCircularRepeater')
+      ) {
+        setLastCursorCanvas({ x: cx, y: cy });
+      } else {
+        setLastCursorCanvas(null);
       }
     },
   );
@@ -2555,6 +4028,7 @@ const App: Component = () => {
           (pm &&
             gs === 'execute' &&
             (tc === 'move' ||
+              tc === 'modifyPlaceOnCircularRepeater' ||
               tc === 'moveCircularField' ||
               tc === 'addLine' ||
               tc === 'splitLine' ||
@@ -2579,7 +4053,13 @@ const App: Component = () => {
             (tc === 'addAxis' || tc === 'modifyAxis')) ||
           (draggingPlaceOnAxis() != null &&
             gs === 'execute' &&
-            tc === 'addPlaceOnAxis');
+            tc === 'addPlaceOnAxis') ||
+          (draggingPlaceOnCircularField() != null &&
+            gs === 'execute' &&
+            tc === 'addPlaceOnCircularField') ||
+          (draggingPlaceOnCircularRepeater() != null &&
+            gs === 'execute' &&
+            tc === 'addPlaceOnCircularRepeater');
         if (shouldDrag) {
           isMoveDrag = true;
           onMove((moveEv) => {
@@ -2643,6 +4123,7 @@ const App: Component = () => {
           selectedCircularFieldId={selectedCircularFieldId()}
           selectedBendingCircularFieldId={selectedBendingCircularFieldId()}
           selectedAxisId={selectedAxisId()}
+          selectedCircularRepeaterId={selectedCircularRepeaterId()}
           transformChoice={transformChoice()}
           onStepObserve={resetGuide}
           onStepSelect={() => setGuideStep('select')}
@@ -2656,6 +4137,7 @@ const App: Component = () => {
                 setSelectedCircularFieldId(null);
                 setSelectedBendingCircularFieldId(null);
                 setSelectedAxisId(null);
+                setSelectedCircularRepeaterId(null);
                 setHasDrawingPaneSelected(false);
               });
             } else {
@@ -2670,12 +4152,19 @@ const App: Component = () => {
             setSelectedCircularFieldId(null);
             setSelectedBendingCircularFieldId(null);
             setSelectedAxisId(null);
+            setSelectedCircularRepeaterId(null);
             setGuideStep('transform');
           }}
           onTransformChoice={handleTransformChoice}
           onCommit={handleCommit}
           onReject={handleReject}
-          onReset={resetGuide}
+          onReset={() => {
+            if (guideStep() === 'execute' || guideStep() === 'complete') {
+              goToSelectStep();
+            } else {
+              resetGuide();
+            }
+          }}
           hasDrawingPaneSelected={hasDrawingPaneSelected()}
           pendingAdd={!!pendingAdd()}
           pendingMove={!!pendingMove()}
@@ -2701,7 +4190,46 @@ const App: Component = () => {
           pendingModifyAxis={!!pendingModifyAxis()}
           pendingDeleteAxisId={!!pendingDeleteAxisId()}
           pendingAddPlaceOnAxis={!!pendingAddPlaceOnAxis()}
+          pendingAddPlaceOnCircularField={!!pendingAddPlaceOnCircularField()}
+          pendingAddCircularRepeater={!!pendingAddCircularRepeater()}
+          pendingModifyCircularRepeater={!!pendingModifyCircularRepeater()}
+          pendingAddPlaceOnCircularRepeater={
+            !!pendingAddPlaceOnCircularRepeater()
+          }
+          pendingModifyPlaceOnCircularRepeater={
+            !!pendingModifyPlaceOnCircularRepeater()
+          }
+          pendingDeleteCircularRepeaterId={!!pendingDeleteCircularRepeaterId()}
+          circularRepeaterCount={
+            pendingAddCircularRepeater()?.count ??
+            pendingModifyCircularRepeater()?.count ??
+            4
+          }
+          onRepeaterCountChange={(n) => {
+            const pa = pendingAddCircularRepeater();
+            if (pa) setPendingAddCircularRepeater({ ...pa, count: n });
+            const pmod = pendingModifyCircularRepeater();
+            if (pmod) setPendingModifyCircularRepeater({ ...pmod, count: n });
+          }}
           bendAtEndsState={bendAtEndsState()}
+          axisDirection={
+            (transformChoice() === 'addAxis' ||
+              transformChoice() === 'modifyAxis') &&
+            (pendingAddAxis() ?? pendingModifyAxis())
+              ? {
+                  isBidirectional:
+                    (pendingAddAxis() ?? pendingModifyAxis())
+                      ?.isBidirectional ?? true,
+                  onDirectionChange: (v: boolean) => {
+                    const pa = pendingAddAxis();
+                    if (pa) setPendingAddAxis({ ...pa, isBidirectional: v });
+                    const pmod = pendingModifyAxis();
+                    if (pmod)
+                      setPendingModifyAxis({ ...pmod, isBidirectional: v });
+                  },
+                }
+              : null
+          }
           availableTransforms={availableTransformsList()}
           scale={scale()}
           onZoomIn={zoomIn}
@@ -2736,51 +4264,135 @@ const App: Component = () => {
               guideStep() === 'execute' &&
               selectedPlaceId() &&
               (() => {
-                const place = placesWithAbsolutePositions().find(
+                const placesAbs = placesWithAbsolutePositions();
+                const selectedPlace = placesAbs.find(
                   (p) => p.id === selectedPlaceId(),
                 );
-                if (!place) return null;
-                const theta =
-                  pendingRotate()?.angle ?? place.absWorldAngle ?? 0;
-                const cx = place.absX;
-                const cy = place.absY;
-                const ex = cx + ORIENTATION_AXIS_LENGTH * Math.sin(theta);
-                const ey = cy - ORIENTATION_AXIS_LENGTH * Math.cos(theta);
-                const arrowSize = 18;
-                const baseX = ex - arrowSize * Math.sin(theta);
-                const baseY = ey + arrowSize * Math.cos(theta);
-                const perp = 0.5 * arrowSize;
-                const leftX = baseX + perp * Math.cos(theta);
-                const leftY = baseY + perp * Math.sin(theta);
-                const rightX = baseX - perp * Math.cos(theta);
-                const rightY = baseY - perp * Math.sin(theta);
-                const arrowD = `M ${ex} ${ey} L ${leftX} ${leftY} L ${rightX} ${rightY} Z`;
+                if (!selectedPlace) return null;
+                const groupId = (selectedPlace as PlaceLike).repeaterEchoGroupId;
+                const placesToDraw =
+                  groupId != null
+                    ? placesAbs.filter(
+                        (p) =>
+                          (p as PlaceLike).repeaterEchoGroupId === groupId,
+                      )
+                    : [selectedPlace];
                 return (
                   <g>
-                    <line
-                      x1={cx}
-                      y1={cy}
-                      x2={ex}
-                      y2={ey}
-                      stroke={svgTokens.orientationAxisStroke}
-                      stroke-width={svgTokens.orientationAxisStrokeWidth}
-                      stroke-dasharray={svgTokens.orientationAxisDasharray}
-                      style={svgTokens.pointerEventsNone}
-                    />
-                    <path
-                      d={arrowD}
-                      fill={svgTokens.orientationAxisFill}
-                      style={svgTokens.pointerEventsNone}
-                    />
-                    <line
-                      x1={cx}
-                      y1={cy}
-                      x2={ex}
-                      y2={ey}
-                      stroke="transparent"
-                      stroke-width={72}
-                      style={svgTokens.cursorGrab}
-                    />
+                    {placesToDraw.map((place) => {
+                      const cx = place.absX;
+                      const cy = place.absY;
+                      const isSelected = place.id === selectedPlaceId();
+                      const parentAxisId = (place as PlaceLike).parentAxisId;
+                      const axis =
+                        parentAxisId != null
+                          ? axes().find((a) => a.id === parentAxisId)
+                          : null;
+                      const isRepeaterEcho =
+                        axis != null &&
+                        (axis as { circularRepeaterId?: CircularRepeaterId })
+                          .circularRepeaterId != null;
+                      const centerPlace =
+                        axis != null
+                          ? placesAbs.find((p) => p.id === axis.placeId)
+                          : null;
+                      const radialAngle =
+                        isRepeaterEcho && centerPlace != null
+                          ? Math.atan2(
+                              cy - centerPlace.absY,
+                              cx - centerPlace.absX,
+                            )
+                          : null;
+                      const isAxisPlace = parentAxisId != null;
+                      const theta =
+                        isSelected
+                          ? pendingRotate()?.angle ??
+                            (radialAngle ?? place.absWorldAngle ?? 0)
+                          : place.absWorldAngle ?? 0;
+                      const dirX = isAxisPlace
+                        ? Math.cos(theta)
+                        : Math.sin(theta);
+                      const dirY = isAxisPlace
+                        ? Math.sin(theta)
+                        : -Math.cos(theta);
+                      const ex =
+                        cx + ORIENTATION_AXIS_LENGTH * dirX;
+                      const ey =
+                        cy + ORIENTATION_AXIS_LENGTH * dirY;
+                      const axisAngle = Math.atan2(dirY, dirX);
+                      const cursor = lastCursorCanvas();
+                      const tRaw = cursor
+                        ? projectPointOntoAxis(
+                            cursor.x,
+                            cursor.y,
+                            cx,
+                            cy,
+                            axisAngle,
+                          )
+                        : 0.8 * ORIENTATION_AXIS_LENGTH;
+                      const t = Math.max(
+                        0,
+                        Math.min(ORIENTATION_AXIS_LENGTH, tRaw),
+                      );
+                      const handleX = cx + t * dirX;
+                      const handleY = cy + t * dirY;
+                      const arrowSize = 18;
+                      const baseX = ex - arrowSize * dirX;
+                      const baseY = ey - arrowSize * dirY;
+                      const perp = 0.5 * arrowSize;
+                      const perpX = -dirY;
+                      const perpY = dirX;
+                      const leftX = baseX + perp * perpX;
+                      const leftY = baseY + perp * perpY;
+                      const rightX = baseX - perp * perpX;
+                      const rightY = baseY - perp * perpY;
+                      const arrowD = `M ${ex} ${ey} L ${leftX} ${leftY} L ${rightX} ${rightY} Z`;
+                      const orientHandleSize = svgTokens.handleSize;
+                      return (
+                        <g key={place.id}>
+                          <line
+                            x1={cx}
+                            y1={cy}
+                            x2={ex}
+                            y2={ey}
+                            stroke={svgTokens.orientationAxisStroke}
+                            stroke-width={
+                              svgTokens.orientationAxisStrokeWidth
+                            }
+                            stroke-dasharray={
+                              svgTokens.orientationAxisDasharray
+                            }
+                            style={svgTokens.pointerEventsNone}
+                          />
+                          <path
+                            d={arrowD}
+                            fill={svgTokens.orientationAxisFill}
+                            style={svgTokens.pointerEventsNone}
+                          />
+                          {isSelected && (
+                            <>
+                              <rect
+                                x={handleX - orientHandleSize / 2}
+                                y={handleY - orientHandleSize / 2}
+                                width={orientHandleSize}
+                                height={orientHandleSize}
+                                fill={svgTokens.handleFill}
+                                style={svgTokens.pointerEventsNone}
+                              />
+                              <line
+                                x1={cx}
+                                y1={cy}
+                                x2={ex}
+                                y2={ey}
+                                stroke="transparent"
+                                stroke-width={72}
+                                style={svgTokens.cursorGrab}
+                              />
+                            </>
+                          )}
+                        </g>
+                      );
+                    })}
                   </g>
                 );
               })()}
@@ -2798,21 +4410,36 @@ const App: Component = () => {
                   : null;
               const pa = pendingAddAxis();
               const pmod = pendingModifyAxis();
+              const gs = guideStep();
+              const tc = transformChoice();
+              const showAxisHandle =
+                gs === 'execute' &&
+                (tc === 'addAxis' || tc === 'modifyAxis') &&
+                (pa != null || pmod != null);
               const axesToDraw: Array<{
                 id: AxisId | string;
                 placeId: PlaceId;
                 angle: number;
+                isBidirectional: boolean;
+                circularRepeaterId?: CircularRepeaterId | null;
               }> = axes().map((axis) => ({
                 id: axis.id,
                 placeId: axis.placeId,
                 angle:
                   pmod?.axisId === axis.id ? pmod.angle : Number(axis.angle),
+                isBidirectional:
+                  pmod?.axisId === axis.id
+                    ? pmod.isBidirectional
+                    : axis.isBidirectional !== 0,
+                circularRepeaterId: (axis as { circularRepeaterId?: CircularRepeaterId })
+                  .circularRepeaterId,
               }));
               if (pa)
                 axesToDraw.push({
                   id: 'pending-axis',
                   placeId: pa.placeId,
                   angle: pa.angle,
+                  isBidirectional: pa.isBidirectional,
                 });
               return axesToDraw.map((axisLike) => {
                 const geom = getAxisWorldGeometry(
@@ -2823,6 +4450,7 @@ const App: Component = () => {
                   },
                   placesAbs,
                 );
+                const unidirectional = !axisLike.isBidirectional;
                 const seg =
                   viewport != null
                     ? axisSegmentInViewport(
@@ -2830,6 +4458,8 @@ const App: Component = () => {
                         geom.originY,
                         geom.worldAngle,
                         viewport,
+                        100,
+                        { unidirectional },
                       )
                     : {
                         x1: geom.originX,
@@ -2841,26 +4471,82 @@ const App: Component = () => {
                   typeof axisLike.id === 'string'
                     ? false
                     : axisLike.id === selectedAxisId();
+                const isRepeaterSelected =
+                  selectedCircularRepeaterId() != null &&
+                  (axisLike as { circularRepeaterId?: CircularRepeaterId })
+                    .circularRepeaterId === selectedCircularRepeaterId();
+                const isActiveAxis =
+                  showAxisHandle &&
+                  ((pa != null && axisLike.id === 'pending-axis') ||
+                    (pmod != null && axisLike.id === pmod.axisId));
+                const segLen = Math.hypot(seg.x2 - seg.x1, seg.y2 - seg.y1);
+                const t1 = projectPointOntoAxis(
+                  seg.x1,
+                  seg.y1,
+                  geom.originX,
+                  geom.originY,
+                  geom.worldAngle,
+                );
+                const t2 = projectPointOntoAxis(
+                  seg.x2,
+                  seg.y2,
+                  geom.originX,
+                  geom.originY,
+                  geom.worldAngle,
+                );
+                const tMin = Math.min(t1, t2);
+                const tMax = Math.max(t1, t2);
+                const cursor = lastCursorCanvas();
+                const tClamped = cursor
+                  ? Math.max(
+                      tMin,
+                      Math.min(
+                        tMax,
+                        projectPointOntoAxis(
+                          cursor.x,
+                          cursor.y,
+                          geom.originX,
+                          geom.originY,
+                          geom.worldAngle,
+                        ),
+                      ),
+                    )
+                  : (tMin + tMax) / 2;
+                const axisHandleX =
+                  geom.originX + tClamped * Math.cos(geom.worldAngle);
+                const axisHandleY =
+                  geom.originY + tClamped * Math.sin(geom.worldAngle);
+                const axisHandleSize = svgTokens.handleSize;
                 return (
                   <g>
-                  <line
-                    x1={seg.x1}
-                    y1={seg.y1}
-                    x2={seg.x2}
-                    y2={seg.y2}
-                    stroke={
-                      isSelected
-                        ? svgTokens.placeSelectedStroke
-                        : svgTokens.orientationAxisStroke
-                    }
-                    stroke-width={
-                      isSelected
-                        ? svgTokens.placeSelectedStrokeWidth
-                        : svgTokens.orientationAxisStrokeWidth
-                    }
-                    stroke-dasharray={svgTokens.orientationAxisDasharray}
-                    style={svgTokens.pointerEventsNone}
-                  />
+                    <line
+                      x1={seg.x1}
+                      y1={seg.y1}
+                      x2={seg.x2}
+                      y2={seg.y2}
+                      stroke={
+                        isSelected || isRepeaterSelected
+                          ? svgTokens.placeSelectedStroke
+                          : svgTokens.orientationAxisStroke
+                      }
+                      stroke-width={
+                        isSelected || isRepeaterSelected
+                          ? svgTokens.placeSelectedStrokeWidth
+                          : svgTokens.orientationAxisStrokeWidth
+                      }
+                      stroke-dasharray={svgTokens.orientationAxisDasharray}
+                      style={svgTokens.pointerEventsNone}
+                    />
+                    {isActiveAxis && segLen > 0 && (
+                      <rect
+                        x={axisHandleX - axisHandleSize / 2}
+                        y={axisHandleY - axisHandleSize / 2}
+                        width={axisHandleSize}
+                        height={axisHandleSize}
+                        fill={svgTokens.handleFill}
+                        style={svgTokens.pointerEventsNone}
+                      />
+                    )}
                   </g>
                 );
               });
@@ -2961,38 +4647,63 @@ const App: Component = () => {
                 />
               </g>
             ))}
-            {bendingFieldsWithPositions().map((bf) => (
-              <g>
-                <circle
-                  cx={bf.centerX}
-                  cy={bf.centerY}
-                  r={bf.radius}
-                  fill="none"
-                  stroke={
-                    bf.id === selectedBendingCircularFieldId()
-                      ? svgTokens.placeSelectedStroke
-                      : svgTokens.circularFieldScaffoldingStroke
-                  }
-                  stroke-width={svgTokens.circularFieldScaffoldingStrokeWidth}
-                  stroke-dasharray={svgTokens.circularFieldScaffoldingDasharray}
-                  style={svgTokens.pointerEventsNone}
-                />
-                <line
-                  x1={bf.centerX}
-                  y1={bf.centerY}
-                  x2={bf.endX}
-                  y2={bf.endY}
-                  stroke={
-                    bf.id === selectedBendingCircularFieldId()
-                      ? svgTokens.placeSelectedStroke
-                      : svgTokens.circularFieldScaffoldingStroke
-                  }
-                  stroke-width={svgTokens.circularFieldScaffoldingStrokeWidth}
-                  stroke-dasharray={svgTokens.circularFieldRadiusLineDasharray}
-                  style={svgTokens.pointerEventsNone}
-                />
-              </g>
-            ))}
+            {bendingFieldsWithPositions().map((bf) => {
+              const gs = guideStep();
+              const tc = transformChoice();
+              const isSelectedBending =
+                bf.id === selectedBendingCircularFieldId();
+              const showBendingHandle =
+                gs === 'execute' &&
+                isSelectedBending &&
+                (tc === 'modifyBendingCircularField' || tc === 'bendAtEnds');
+              const bendingHandleSize = svgTokens.handleSize;
+              return (
+                <g>
+                  <circle
+                    cx={bf.centerX}
+                    cy={bf.centerY}
+                    r={bf.radius}
+                    fill="none"
+                    stroke={
+                      isSelectedBending
+                        ? svgTokens.placeSelectedStroke
+                        : svgTokens.circularFieldScaffoldingStroke
+                    }
+                    stroke-width={svgTokens.circularFieldScaffoldingStrokeWidth}
+                    stroke-dasharray={
+                      svgTokens.circularFieldScaffoldingDasharray
+                    }
+                    style={svgTokens.pointerEventsNone}
+                  />
+                  <line
+                    x1={bf.centerX}
+                    y1={bf.centerY}
+                    x2={bf.endX}
+                    y2={bf.endY}
+                    stroke={
+                      isSelectedBending
+                        ? svgTokens.placeSelectedStroke
+                        : svgTokens.circularFieldScaffoldingStroke
+                    }
+                    stroke-width={svgTokens.circularFieldScaffoldingStrokeWidth}
+                    stroke-dasharray={
+                      svgTokens.circularFieldRadiusLineDasharray
+                    }
+                    style={svgTokens.pointerEventsNone}
+                  />
+                  {showBendingHandle && (
+                    <rect
+                      x={bf.centerX - bendingHandleSize / 2}
+                      y={bf.centerY - bendingHandleSize / 2}
+                      width={bendingHandleSize}
+                      height={bendingHandleSize}
+                      fill={svgTokens.handleFill}
+                      style={svgTokens.pointerEventsNone}
+                    />
+                  )}
+                </g>
+              );
+            })}
             {(() => {
               const pac = pendingAddCircularField();
               if (pac?.stage !== 'editing') return null;
@@ -3003,6 +4714,7 @@ const App: Component = () => {
               const centerY = place?.absY ?? 0;
               const handleX = centerX + pac.radius;
               const handleY = centerY;
+              const addCfHandleSize = svgTokens.handleSize;
               return (
                 <g>
                   <line
@@ -3016,6 +4728,16 @@ const App: Component = () => {
                       svgTokens.circularFieldRadiusLineDasharray
                     }
                   />
+                  {guideStep() === 'execute' && (
+                    <rect
+                      x={handleX - addCfHandleSize / 2}
+                      y={handleY - addCfHandleSize / 2}
+                      width={addCfHandleSize}
+                      height={addCfHandleSize}
+                      fill={svgTokens.handleFill}
+                      style={svgTokens.pointerEventsNone}
+                    />
+                  )}
                   <line
                     x1={centerX}
                     y1={centerY}
@@ -3039,6 +4761,7 @@ const App: Component = () => {
               const centerY = cf.centerY;
               const handleX = centerX + pmc.radius;
               const handleY = centerY;
+              const cfHandleSize = svgTokens.handleSize;
               return (
                 <g>
                   <line
@@ -3052,6 +4775,16 @@ const App: Component = () => {
                       svgTokens.circularFieldRadiusLineDasharray
                     }
                   />
+                  {guideStep() === 'execute' && (
+                    <rect
+                      x={handleX - cfHandleSize / 2}
+                      y={handleY - cfHandleSize / 2}
+                      width={cfHandleSize}
+                      height={cfHandleSize}
+                      fill={svgTokens.handleFill}
+                      style={svgTokens.pointerEventsNone}
+                    />
+                  )}
                   <line
                     x1={centerX}
                     y1={centerY}
@@ -3118,8 +4851,11 @@ const App: Component = () => {
             })}
             {displayPlaces().map((item) => {
               const sid = selectedPlaceId();
+              const echoGroupIds = selectedEchoGroupPlaceIds();
+              const isSelected =
+                item.id !== 'pending' &&
+                (item.id === sid || echoGroupIds.has(item.id as PlaceId));
               const rel = relatedPlaceIds();
-              const isSelected = item.id !== 'pending' && item.id === sid;
               const isParent =
                 item.id !== 'pending' &&
                 rel.parentId !== null &&
@@ -3134,6 +4870,24 @@ const App: Component = () => {
                 item.id === pid &&
                 tc === 'delete' &&
                 (gs === 'execute' || gs === 'complete');
+              const handlePlaceId = moveHandlePlaceId();
+              const isHandlePlace =
+                item.id !== 'pending' &&
+                item.id === handlePlaceId &&
+                gs === 'execute' &&
+                (tc === 'move' ||
+                  tc === 'modifyPlaceOnCircularRepeater' ||
+                  tc === 'rotate' ||
+                  tc === 'addRelated' ||
+                  tc === 'delete');
+              const isAddPlaceOnCircularFieldHandle =
+                item.id === PENDING_CIRCULAR_FIELD_PLACE &&
+                gs === 'execute' &&
+                tc === 'addPlaceOnCircularField';
+              const isAddPlaceOnAxisHandle =
+                item.id === PENDING_AXIS_PLACE &&
+                gs === 'execute' &&
+                tc === 'addPlaceOnAxis';
               const isScaffolding = item.isScaffolding !== 0;
               const stroke = isSelected
                 ? svgTokens.placeSelectedStroke
@@ -3149,6 +4903,7 @@ const App: Component = () => {
                 ? svgTokens.placeScaffoldingDasharray
                 : undefined;
               const xSize = CROSSHAIR_SIZE + 6;
+              const handleSize = svgTokens.handleSize;
               return (
                 <g class="cursor-pointer">
                   {isPendingDelete && (
@@ -3189,7 +4944,20 @@ const App: Component = () => {
                     stroke-width={strokeWidth}
                     stroke-dasharray={placeDasharray}
                   />
-                  {isSelected && !isPendingDelete && (
+                  {(isHandlePlace ||
+                    isAddPlaceOnCircularFieldHandle ||
+                    isAddPlaceOnAxisHandle) &&
+                    !isPendingDelete && (
+                      <rect
+                        x={item.x - handleSize / 2}
+                        y={item.y - handleSize / 2}
+                        width={handleSize}
+                        height={handleSize}
+                        fill={svgTokens.handleFill}
+                        style={svgTokens.pointerEventsNone}
+                      />
+                    )}
+                  {isSelected && !isPendingDelete && !isHandlePlace && (
                     <circle
                       cx={item.x}
                       cy={item.y}
@@ -3242,6 +5010,20 @@ const App: Component = () => {
               setSelectedLineSegmentId(null);
               setSelectedCircularFieldId(null);
               setSelectedBendingCircularFieldId(null);
+              setSelectedCircularRepeaterId(null);
+              setHasDrawingPaneSelected(false);
+              setGuideStep('transform');
+            });
+          }}
+          selectedCircularRepeaterId={selectedCircularRepeaterId()}
+          onSelectRepeater={(id) => {
+            batch(() => {
+              setSelectedCircularRepeaterId(id);
+              setSelectedPlaceId(null);
+              setSelectedLineSegmentId(null);
+              setSelectedCircularFieldId(null);
+              setSelectedBendingCircularFieldId(null);
+              setSelectedAxisId(null);
               setHasDrawingPaneSelected(false);
               setGuideStep('transform');
             });

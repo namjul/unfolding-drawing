@@ -15,6 +15,7 @@ import type {
   AxisId,
   BendingCircularFieldId,
   CircularFieldId,
+  CircularRepeaterId,
   LineSegmentId,
   PlaceId,
 } from './evolu-db';
@@ -138,6 +139,7 @@ export type RecordAddAxis = {
   placeId: PlaceId;
   axisId: AxisId;
   angle: number;
+  isBidirectional?: number | null;
 };
 
 /** Payload for modify axis. */
@@ -146,6 +148,7 @@ export type RecordModifyAxis = {
   placeId: PlaceId;
   axisId: AxisId;
   angle: number;
+  isBidirectional?: number | null;
 };
 
 /** Payload for delete axis. */
@@ -161,6 +164,54 @@ export type RecordAddPlaceOnAxis = {
   placeId: PlaceId;
   axisId: AxisId;
   distanceAlongAxis: number;
+};
+
+/** Payload for add place on circular field. */
+export type RecordAddPlaceOnCircularField = {
+  kind: 'addPlaceOnCircularField';
+  placeId: PlaceId;
+  circularFieldId: CircularFieldId;
+  angleOnCircle: number;
+};
+
+/** Payload for add circular repeater. */
+export type RecordAddCircularRepeater = {
+  kind: 'addCircularRepeater';
+  placeId: PlaceId;
+  circularRepeaterId: CircularRepeaterId;
+  count: number;
+};
+
+/** Payload for modify circular repeater. */
+export type RecordModifyCircularRepeater = {
+  kind: 'modifyCircularRepeater';
+  placeId: PlaceId;
+  circularRepeaterId: CircularRepeaterId;
+  count: number;
+};
+
+/** Payload for delete circular repeater. */
+export type RecordDeleteCircularRepeater = {
+  kind: 'deleteCircularRepeater';
+  placeId: PlaceId;
+  circularRepeaterId: CircularRepeaterId;
+};
+
+/** Payload for add place on circular repeater (N echo places). */
+export type RecordAddPlaceOnCircularRepeater = {
+  kind: 'addPlaceOnCircularRepeater';
+  circularRepeaterId: CircularRepeaterId;
+  placeId: PlaceId;
+  distanceAlongAxis: number;
+};
+
+/** Payload for modify place on circular repeater (move echo set). */
+export type RecordModifyPlaceOnCircularRepeater = {
+  kind: 'modifyPlaceOnCircularRepeater';
+  placeId: PlaceId;
+  circularRepeaterId: CircularRepeaterId;
+  distanceAlongAxis: number;
+  distanceFromAxis: number;
 };
 
 export type TransformationRecord =
@@ -181,7 +232,13 @@ export type TransformationRecord =
   | RecordAddAxis
   | RecordModifyAxis
   | RecordDeleteAxis
-  | RecordAddPlaceOnAxis;
+  | RecordAddPlaceOnAxis
+  | RecordAddPlaceOnCircularField
+  | RecordAddCircularRepeater
+  | RecordModifyCircularRepeater
+  | RecordDeleteCircularRepeater
+  | RecordAddPlaceOnCircularRepeater
+  | RecordModifyPlaceOnCircularRepeater;
 
 /**
  * Records one committed transformation. Call this exactly once per committed
@@ -371,6 +428,8 @@ export function recordTransformation(data: TransformationRecord): void {
         bendingCircularFieldId: null,
         axisId: data.axisId,
         radius: null,
+        angleOnCircle: null,
+        axisIsBidirectional: data.isBidirectional ?? null,
       });
       break;
     case 'modifyAxis':
@@ -388,6 +447,8 @@ export function recordTransformation(data: TransformationRecord): void {
         bendingCircularFieldId: null,
         axisId: data.axisId,
         radius: null,
+        angleOnCircle: null,
+        axisIsBidirectional: data.isBidirectional ?? null,
       });
       break;
     case 'deleteAxis':
@@ -422,6 +483,127 @@ export function recordTransformation(data: TransformationRecord): void {
         bendingCircularFieldId: null,
         axisId: data.axisId,
         radius: null,
+      });
+      break;
+    case 'addPlaceOnCircularField': {
+      const d = data;
+      evolu.insert('transformation', {
+        kind: 'addPlaceOnCircularField',
+        placeId: d.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: null,
+        lineSegmentId2: null,
+        lineSegmentId3: null,
+        circularFieldId: d.circularFieldId,
+        bendingCircularFieldId: null,
+        axisId: null,
+        radius: null,
+        angleOnCircle: d.angleOnCircle,
+        circularRepeaterId: null,
+      });
+      break;
+    }
+    case 'addCircularRepeater':
+      evolu.insert('transformation', {
+        kind: 'addCircularRepeater',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: null,
+        lineSegmentId2: null,
+        lineSegmentId3: null,
+        circularFieldId: null,
+        bendingCircularFieldId: null,
+        axisId: null,
+        radius: data.count,
+        angleOnCircle: null,
+        axisIsBidirectional: null,
+        circularRepeaterId: data.circularRepeaterId,
+      });
+      break;
+    case 'modifyCircularRepeater':
+      evolu.insert('transformation', {
+        kind: 'modifyCircularRepeater',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: null,
+        lineSegmentId2: null,
+        lineSegmentId3: null,
+        circularFieldId: null,
+        bendingCircularFieldId: null,
+        axisId: null,
+        radius: data.count,
+        angleOnCircle: null,
+        axisIsBidirectional: null,
+        circularRepeaterId: data.circularRepeaterId,
+      });
+      break;
+    case 'deleteCircularRepeater':
+      evolu.insert('transformation', {
+        kind: 'deleteCircularRepeater',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: null,
+        lineSegmentId2: null,
+        lineSegmentId3: null,
+        circularFieldId: null,
+        bendingCircularFieldId: null,
+        axisId: null,
+        radius: null,
+        angleOnCircle: null,
+        axisIsBidirectional: null,
+        circularRepeaterId: data.circularRepeaterId,
+      });
+      break;
+    case 'addPlaceOnCircularRepeater':
+      evolu.insert('transformation', {
+        kind: 'addPlaceOnCircularRepeater',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: null,
+        lineSegmentId2: null,
+        lineSegmentId3: null,
+        circularFieldId: null,
+        bendingCircularFieldId: null,
+        axisId: null,
+        radius: data.distanceAlongAxis,
+        angleOnCircle: null,
+        axisIsBidirectional: null,
+        circularRepeaterId: data.circularRepeaterId,
+      });
+      break;
+    case 'modifyPlaceOnCircularRepeater':
+      evolu.insert('transformation', {
+        kind: 'modifyPlaceOnCircularRepeater',
+        placeId: data.placeId,
+        parentId: null,
+        x: null,
+        y: null,
+        angle: null,
+        lineSegmentId: null,
+        lineSegmentId2: null,
+        lineSegmentId3: null,
+        circularFieldId: null,
+        bendingCircularFieldId: null,
+        axisId: null,
+        radius: data.distanceAlongAxis,
+        angleOnCircle: null,
+        axisIsBidirectional: null,
+        circularRepeaterId: data.circularRepeaterId,
       });
       break;
   }

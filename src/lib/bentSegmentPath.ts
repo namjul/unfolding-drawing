@@ -136,7 +136,10 @@ function outerCommonTangentPoints(
   const z = vx * vx + vy * vy;
   if (z < EPS) return [];
 
-  const pairs: { ta: { x: number; y: number }; tb: { x: number; y: number } }[] = [];
+  const pairs: {
+    ta: { x: number; y: number };
+    tb: { x: number; y: number };
+  }[] = [];
 
   for (const si of [-1, 1]) {
     for (const sj of [-1, 1]) {
@@ -195,7 +198,7 @@ function arcSweepAngle(
 function pickTangentForArcToEnd(
   cx: number,
   cy: number,
-  r: number,
+  _r: number,
   t1: { x: number; y: number },
   t2: { x: number; y: number },
   segmentEndX: number,
@@ -203,7 +206,6 @@ function pickTangentForArcToEnd(
   _otherEndX: number,
   _otherEndY: number,
 ): { x: number; y: number } {
-  const angleEnd = Math.atan2(segmentEndY - cy, segmentEndX - cx);
   const sweep1 = arcSweepAngle(t1.x, t1.y, segmentEndX, segmentEndY, cx, cy);
   const sweep2 = arcSweepAngle(t2.x, t2.y, segmentEndX, segmentEndY, cx, cy);
   return Math.abs(sweep1) <= Math.abs(sweep2) ? t1 : t2;
@@ -270,7 +272,7 @@ function arcAlongCircleToward(
   if (sweep < -Math.PI) sweep += 2 * Math.PI;
   const shortSweep = sweep;
   const longSweep = sweep >= 0 ? sweep - 2 * Math.PI : sweep + 2 * Math.PI;
-  const shortTangentMatches = (shortSweep > 0 ? dotCcw > 0 : dotCw > 0);
+  const shortTangentMatches = shortSweep > 0 ? dotCcw > 0 : dotCw > 0;
   const useLong = !shortTangentMatches;
   const finalSweep = useLong ? longSweep : shortSweep;
   const largeArc = Math.abs(finalSweep) > Math.PI ? 1 : 0;
@@ -512,8 +514,22 @@ export function buildBentSegmentPath(
       let best = pairs[0];
       let bestLen = Infinity;
       for (const { ta, tb } of pairs) {
-        const sweepA = arcSweepAngle(x1, y1, ta.x, ta.y, bendA.centerX, bendA.centerY);
-        const sweepB = arcSweepAngle(tb.x, tb.y, x2, y2, bendB.centerX, bendB.centerY);
+        const sweepA = arcSweepAngle(
+          x1,
+          y1,
+          ta.x,
+          ta.y,
+          bendA.centerX,
+          bendA.centerY,
+        );
+        const sweepB = arcSweepAngle(
+          tb.x,
+          tb.y,
+          x2,
+          y2,
+          bendB.centerX,
+          bendB.centerY,
+        );
         const arcLen =
           bendA.radius * Math.abs(sweepA) + bendB.radius * Math.abs(sweepB);
         if (arcLen < bestLen) {
@@ -521,8 +537,13 @@ export function buildBentSegmentPath(
           best = { ta, tb };
         }
       }
-      const ta = best.ta;
-      const tb = best.tb;
+      type TangentPair = {
+        ta: { x: number; y: number };
+        tb: { x: number; y: number };
+      };
+      const b: TangentPair = (best ?? pairs[0]) as TangentPair;
+      const ta = b.ta;
+      const tb = b.tb;
       const arcA = arcAlongCircleToward(
         x1,
         y1,
@@ -905,8 +926,22 @@ export function distanceFromPointToBentPath(
       let best = pairs[0];
       let bestLen = Infinity;
       for (const { ta, tb } of pairs) {
-        const sweepA = arcSweepAngle(x1, y1, ta.x, ta.y, bendA.centerX, bendA.centerY);
-        const sweepB = arcSweepAngle(tb.x, tb.y, x2, y2, bendB.centerX, bendB.centerY);
+        const sweepA = arcSweepAngle(
+          x1,
+          y1,
+          ta.x,
+          ta.y,
+          bendA.centerX,
+          bendA.centerY,
+        );
+        const sweepB = arcSweepAngle(
+          tb.x,
+          tb.y,
+          x2,
+          y2,
+          bendB.centerX,
+          bendB.centerY,
+        );
         const arcLen =
           bendA.radius * Math.abs(sweepA) + bendB.radius * Math.abs(sweepB);
         if (arcLen < bestLen) {
@@ -914,6 +949,11 @@ export function distanceFromPointToBentPath(
           best = { ta, tb };
         }
       }
+      type TangentPair = {
+        ta: { x: number; y: number };
+        tb: { x: number; y: number };
+      };
+      const b: TangentPair = (best ?? pairs[0]) as TangentPair;
       const dArcA = distanceToArc(
         px,
         py,
@@ -922,18 +962,18 @@ export function distanceFromPointToBentPath(
         bendA.radius,
         x1,
         y1,
-        best.ta.x,
-        best.ta.y,
+        b.ta.x,
+        b.ta.y,
       );
-      const dLine = distanceToSegment(px, py, best.ta.x, best.ta.y, best.tb.x, best.tb.y);
+      const dLine = distanceToSegment(px, py, b.ta.x, b.ta.y, b.tb.x, b.tb.y);
       const dArcB = distanceToArc(
         px,
         py,
         bendB.centerX,
         bendB.centerY,
         bendB.radius,
-        best.tb.x,
-        best.tb.y,
+        b.tb.x,
+        b.tb.y,
         x2,
         y2,
       );

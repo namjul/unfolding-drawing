@@ -11,7 +11,12 @@ export function useQuery<R extends Row>(query: Query<R>) {
   const [rows, setRows] = createSignal<QueryRows<R>>([] as QueryRows<R>);
 
   const refresh = (): Promise<void> =>
-    evolu.loadQuery(query).then(setRows).catch(() => {});
+    evolu
+      .loadQuery(query)
+      .then((loaded) => {
+        setRows(loaded);
+      })
+      .catch(() => {});
 
   createEffect(() => {
     let unsub: (() => void) | undefined;

@@ -31,6 +31,9 @@ export type BendingCircularFieldId = typeof BendingCircularFieldId.Type;
 const AxisId = id('Axis');
 export type AxisId = typeof AxisId.Type;
 
+const CircularRepeaterId = id('CircularRepeater');
+export type CircularRepeaterId = typeof CircularRepeaterId.Type;
+
 const TransformationId = id('Transformation');
 export type TransformationId = typeof TransformationId.Type;
 
@@ -52,6 +55,14 @@ const AddAxisKind = literal('addAxis');
 const ModifyAxisKind = literal('modifyAxis');
 const DeleteAxisKind = literal('deleteAxis');
 const AddPlaceOnAxisKind = literal('addPlaceOnAxis');
+const AddPlaceOnCircularFieldKind = literal('addPlaceOnCircularField');
+const AddCircularRepeaterKind = literal('addCircularRepeater');
+const ModifyCircularRepeaterKind = literal('modifyCircularRepeater');
+const DeleteCircularRepeaterKind = literal('deleteCircularRepeater');
+const AddPlaceOnCircularRepeaterKind = literal('addPlaceOnCircularRepeater');
+const ModifyPlaceOnCircularRepeaterKind = literal(
+  'modifyPlaceOnCircularRepeater',
+);
 const TransformationKind = union(
   AddKind,
   AddRelatedKind,
@@ -71,6 +82,12 @@ const TransformationKind = union(
   ModifyAxisKind,
   DeleteAxisKind,
   AddPlaceOnAxisKind,
+  AddPlaceOnCircularFieldKind,
+  AddCircularRepeaterKind,
+  ModifyCircularRepeaterKind,
+  DeleteCircularRepeaterKind,
+  AddPlaceOnCircularRepeaterKind,
+  ModifyPlaceOnCircularRepeaterKind,
 );
 export type TransformationKind = typeof TransformationKind.Type;
 
@@ -80,6 +97,10 @@ export const Schema = {
     parentId: nullOr(PlaceId),
     parentAxisId: nullOr(AxisId),
     distanceAlongAxis: nullOr(FiniteNumber),
+    distanceFromAxis: nullOr(FiniteNumber),
+    repeaterEchoGroupId: nullOr(PlaceId),
+    parentCircularFieldId: nullOr(CircularFieldId),
+    angleOnCircle: nullOr(FiniteNumber),
     x: FiniteNumber,
     y: FiniteNumber,
     angle: nullOr(FiniteNumber),
@@ -90,6 +111,13 @@ export const Schema = {
     id: AxisId,
     placeId: PlaceId,
     angle: FiniteNumber,
+    isBidirectional: nullOr(FiniteNumber),
+    circularRepeaterId: nullOr(CircularRepeaterId),
+  },
+  circularRepeater: {
+    id: CircularRepeaterId,
+    placeId: PlaceId,
+    count: FiniteNumber,
   },
   lineSegmentEnd: {
     id: LineSegmentEndId,
@@ -130,6 +158,9 @@ export const Schema = {
     bendingCircularFieldId: nullOr(BendingCircularFieldId),
     axisId: nullOr(AxisId),
     radius: nullOr(FiniteNumber),
+    angleOnCircle: nullOr(FiniteNumber),
+    axisIsBidirectional: nullOr(FiniteNumber),
+    circularRepeaterId: nullOr(CircularRepeaterId),
   },
 } satisfies EvoluSchema;
 
@@ -202,6 +233,16 @@ export const allBendingCircularFieldsQuery = evolu.createQuery((db) =>
 export const allAxesQuery = evolu.createQuery((db) =>
   db
     .selectFrom('axis')
+    .selectAll()
+    .where((eb) =>
+      eb.or([eb('isDeleted', 'is', null), eb('isDeleted', '=', 0)]),
+    )
+    .orderBy('createdAt'),
+);
+
+export const allCircularRepeatersQuery = evolu.createQuery((db) =>
+  db
+    .selectFrom('circularRepeater')
     .selectAll()
     .where((eb) =>
       eb.or([eb('isDeleted', 'is', null), eb('isDeleted', '=', 0)]),

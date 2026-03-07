@@ -2,6 +2,7 @@ import type {
   AxisId,
   BendingCircularFieldId,
   CircularFieldId,
+  CircularRepeaterId,
   LineSegmentId,
   PlaceId,
 } from './evolu-db';
@@ -9,10 +10,12 @@ import type {
 export type SelectionType =
   | 'drawingPane'
   | 'place'
+  | 'placeOnCircularRepeater'
   | 'lineSegment'
   | 'circularField'
   | 'bendingCircularField'
-  | 'axis';
+  | 'axis'
+  | 'circularRepeater';
 
 export type TransformId =
   | 'add'
@@ -21,16 +24,22 @@ export type TransformId =
   | 'addCircularField'
   | 'addAxis'
   | 'addPlaceOnAxis'
+  | 'addPlaceOnCircularField'
+  | 'addCircularRepeater'
+  | 'addPlaceOnCircularRepeater'
   | 'bendAtEnds'
   | 'move'
   | 'moveCircularField'
   | 'modifyCircularField'
   | 'modifyAxis'
+  | 'modifyCircularRepeater'
+  | 'modifyPlaceOnCircularRepeater'
   | 'modifyBendingCircularField'
   | 'delete'
   | 'deleteAxis'
   | 'deleteLine'
   | 'deleteCircularField'
+  | 'deleteCircularRepeater'
   | 'deleteBendingCircularField'
   | 'splitLine'
   | 'rotate';
@@ -52,23 +61,38 @@ export const TRANSFORMS: readonly TransformDef[] = [
   {
     id: 'addRelated',
     label: 'Add a Related Place',
-    allowedSelectionTypes: ['place'],
+    allowedSelectionTypes: ['place', 'placeOnCircularRepeater'],
   },
   { id: 'addLine', label: 'Add Line', allowedSelectionTypes: ['place'] },
   {
     id: 'addCircularField',
     label: 'Add Circular Field',
-    allowedSelectionTypes: ['drawingPane', 'place'],
+    allowedSelectionTypes: ['drawingPane', 'place', 'placeOnCircularRepeater'],
   },
   {
     id: 'addAxis',
     label: 'Add Axis',
-    allowedSelectionTypes: ['place'],
+    allowedSelectionTypes: ['place', 'placeOnCircularRepeater'],
   },
   {
     id: 'addPlaceOnAxis',
     label: 'Add place on axis',
     allowedSelectionTypes: ['axis'],
+  },
+  {
+    id: 'addPlaceOnCircularField',
+    label: 'Add place on circular field',
+    allowedSelectionTypes: ['circularField'],
+  },
+  {
+    id: 'addCircularRepeater',
+    label: 'Add Circular Repeater',
+    allowedSelectionTypes: ['place'],
+  },
+  {
+    id: 'addPlaceOnCircularRepeater',
+    label: 'Add place on repeater',
+    allowedSelectionTypes: ['circularRepeater'],
   },
   {
     id: 'bendAtEnds',
@@ -91,7 +115,21 @@ export const TRANSFORMS: readonly TransformDef[] = [
     label: 'Modify Axis',
     allowedSelectionTypes: ['axis'],
   },
-  { id: 'delete', label: 'Delete Place', allowedSelectionTypes: ['place'] },
+  {
+    id: 'modifyCircularRepeater',
+    label: 'Modify Circular Repeater',
+    allowedSelectionTypes: ['circularRepeater'],
+  },
+  {
+    id: 'modifyPlaceOnCircularRepeater',
+    label: 'Move Place',
+    allowedSelectionTypes: ['placeOnCircularRepeater'],
+  },
+  {
+    id: 'delete',
+    label: 'Delete Place',
+    allowedSelectionTypes: ['place', 'placeOnCircularRepeater'],
+  },
   {
     id: 'deleteAxis',
     label: 'Delete Axis',
@@ -108,6 +146,11 @@ export const TRANSFORMS: readonly TransformDef[] = [
     allowedSelectionTypes: ['circularField'],
   },
   {
+    id: 'deleteCircularRepeater',
+    label: 'Delete Circular Repeater',
+    allowedSelectionTypes: ['circularRepeater'],
+  },
+  {
     id: 'modifyBendingCircularField',
     label: 'Modify bending field',
     allowedSelectionTypes: ['bendingCircularField'],
@@ -122,7 +165,11 @@ export const TRANSFORMS: readonly TransformDef[] = [
     label: 'Split line segment',
     allowedSelectionTypes: ['lineSegment'],
   },
-  { id: 'rotate', label: 'Rotate Place', allowedSelectionTypes: ['place'] },
+  {
+    id: 'rotate',
+    label: 'Rotate Place',
+    allowedSelectionTypes: ['place', 'placeOnCircularRepeater'],
+  },
 ];
 
 /**
@@ -135,6 +182,7 @@ export function getSelectionType(
   selectedCircularFieldId: CircularFieldId | null,
   selectedBendingCircularFieldId: BendingCircularFieldId | null,
   selectedAxisId: AxisId | null,
+  selectedCircularRepeaterId: CircularRepeaterId | null,
 ): SelectionType | null {
   if (hasDrawingPaneSelected) return 'drawingPane';
   if (selectedPlaceId) return 'place';
@@ -142,6 +190,7 @@ export function getSelectionType(
   if (selectedCircularFieldId) return 'circularField';
   if (selectedBendingCircularFieldId) return 'bendingCircularField';
   if (selectedAxisId) return 'axis';
+  if (selectedCircularRepeaterId) return 'circularRepeater';
   return null;
 }
 

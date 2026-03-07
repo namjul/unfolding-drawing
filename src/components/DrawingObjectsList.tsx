@@ -5,6 +5,7 @@ import type {
   AxisId,
   BendingCircularFieldId,
   CircularFieldId,
+  CircularRepeaterId,
   LineSegmentEndId,
   LineSegmentId,
   PlaceId,
@@ -13,6 +14,7 @@ import {
   allAxesQuery,
   allBendingCircularFieldsQuery,
   allCircularFieldsQuery,
+  allCircularRepeatersQuery,
   allLineSegmentEndsQuery,
   allLineSegmentsQuery,
   allPlacesQuery,
@@ -26,6 +28,8 @@ type PlaceWithAxis = {
   id: PlaceId;
   parentId: PlaceId | null;
   parentAxisId?: AxisId | null;
+  parentCircularFieldId?: CircularFieldId | null;
+  angleOnCircle?: number | null;
   name: string | null;
   x: number;
   y: number;
@@ -34,10 +38,19 @@ type PlaceWithAxis = {
 };
 
 function AxisTreeNode(props: {
-  axis: { id: AxisId; placeId: PlaceId; angle: number };
+  axis: {
+    id: AxisId;
+    placeId: PlaceId;
+    angle: number;
+    isBidirectional?: number | null;
+  };
   placesOnAxis: ReadonlyArray<PlaceWithAxis>;
   places: ReadonlyArray<PlaceWithAxis>;
-  ends: ReadonlyArray<{ id: LineSegmentEndId; placeId: PlaceId; name: string | null }>;
+  ends: ReadonlyArray<{
+    id: LineSegmentEndId;
+    placeId: PlaceId;
+    name: string | null;
+  }>;
   segments: ReadonlyArray<{
     id: LineSegmentId;
     endAId: LineSegmentEndId;
@@ -45,8 +58,16 @@ function AxisTreeNode(props: {
     name: string | null;
     isScaffolding: number | null;
   }>;
-  circularFields: ReadonlyArray<{ id: CircularFieldId; placeId: PlaceId; radius: number }>;
-  bendingCircularFields: ReadonlyArray<{ id: BendingCircularFieldId; lineSegmentEndId: LineSegmentEndId; radius: number }>;
+  circularFields: ReadonlyArray<{
+    id: CircularFieldId;
+    placeId: PlaceId;
+    radius: number;
+  }>;
+  bendingCircularFields: ReadonlyArray<{
+    id: BendingCircularFieldId;
+    lineSegmentEndId: LineSegmentEndId;
+    radius: number;
+  }>;
   depth: number;
   onSelectAxis?: ((id: AxisId) => void) | undefined;
   selectedAxisId?: AxisId | null | undefined;
@@ -67,7 +88,7 @@ function AxisTreeNode(props: {
             class={classes.listItemPlaceButton}
             onClick={() => props.onSelectAxis?.(props.axis.id)}
           >
-            Axis
+            Axis {props.axis.isBidirectional === 0 ? '→' : '↔'}
           </button>
         </span>
       </li>
@@ -79,7 +100,15 @@ function AxisTreeNode(props: {
           segments={props.segments}
           circularFields={props.circularFields}
           bendingCircularFields={props.bendingCircularFields}
-          axes={[] as ReadonlyArray<{ id: AxisId; placeId: PlaceId; angle: number }>}
+          axes={
+            [] as ReadonlyArray<{
+              id: AxisId;
+              placeId: PlaceId;
+              angle: number;
+              isBidirectional?: number | null;
+            }>
+          }
+          circularRepeaters={[]}
           depth={props.depth + 1}
           onSelectAxis={props.onSelectAxis}
           selectedAxisId={props.selectedAxisId}
@@ -95,20 +124,78 @@ function CircularFieldTreeNode(props: {
     placeId: PlaceId;
     radius: number;
   };
+  placesOnCircularField: ReadonlyArray<PlaceWithAxis>;
+  places: ReadonlyArray<PlaceWithAxis>;
+  ends: ReadonlyArray<{
+    id: LineSegmentEndId;
+    placeId: PlaceId;
+    name: string | null;
+  }>;
+  segments: ReadonlyArray<{
+    id: LineSegmentId;
+    endAId: LineSegmentEndId;
+    endBId: LineSegmentEndId;
+    name: string | null;
+    isScaffolding: number | null;
+  }>;
+  circularFields: ReadonlyArray<{
+    id: CircularFieldId;
+    placeId: PlaceId;
+    radius: number;
+  }>;
+  bendingCircularFields: ReadonlyArray<{
+    id: BendingCircularFieldId;
+    lineSegmentEndId: LineSegmentEndId;
+    radius: number;
+  }>;
+  axes: ReadonlyArray<{
+    id: AxisId;
+    placeId: PlaceId;
+    angle: number;
+    isBidirectional?: number | null;
+  }>;
+  circularRepeaters?: ReadonlyArray<{
+    id: CircularRepeaterId;
+    placeId: PlaceId;
+    count: number;
+  }>;
   depth: number;
+  onSelectAxis?: ((id: AxisId) => void) | undefined;
+  selectedAxisId?: AxisId | null | undefined;
+  onSelectRepeater?: ((id: CircularRepeaterId) => void) | undefined;
+  selectedCircularRepeaterId?: CircularRepeaterId | null | undefined;
 }) {
   const indentClass =
     listIndentClasses[Math.min(props.depth, listIndentClasses.length - 1)];
   const displayLabel = () =>
     `Circular field (r: ${Number(props.field.radius)})`;
   return (
-    <li
-      class={`${classes.listRowWithIndicator} ${classes.listItem}`}
-      title={props.field.id}
-    >
-      <span class={classes.listScaffoldingIndicator}>#</span>
-      <span class={`${indentClass} flex-1 min-w-0`}>{displayLabel()}</span>
-    </li>
+    <>
+      <li
+        class={`${classes.listRowWithIndicator} ${classes.listItem}`}
+        title={props.field.id}
+      >
+        <span class={classes.listScaffoldingIndicator}>#</span>
+        <span class={`${indentClass} flex-1 min-w-0`}>{displayLabel()}</span>
+      </li>
+      {props.placesOnCircularField.map((place) => (
+        <PlaceTreeNode
+          place={place}
+          places={props.places}
+          ends={props.ends}
+          segments={props.segments}
+          circularFields={props.circularFields}
+          bendingCircularFields={props.bendingCircularFields}
+          axes={props.axes}
+          circularRepeaters={props.circularRepeaters ?? []}
+          depth={props.depth + 1}
+          onSelectAxis={props.onSelectAxis}
+          selectedAxisId={props.selectedAxisId}
+          onSelectRepeater={props.onSelectRepeater}
+          selectedCircularRepeaterId={props.selectedCircularRepeaterId}
+        />
+      ))}
+    </>
   );
 }
 
@@ -422,9 +509,22 @@ function PlaceTreeNode(props: {
     lineSegmentEndId: LineSegmentEndId;
     radius: number;
   }>;
-  axes?: ReadonlyArray<{ id: AxisId; placeId: PlaceId; angle: number }>;
+  axes?: ReadonlyArray<{
+    id: AxisId;
+    placeId: PlaceId;
+    angle: number;
+    isBidirectional?: number | null;
+    circularRepeaterId?: unknown;
+  }>;
+  circularRepeaters?: ReadonlyArray<{
+    id: CircularRepeaterId;
+    placeId: PlaceId;
+    count: number;
+  }>;
   onSelectAxis?: ((id: AxisId) => void) | undefined;
   selectedAxisId?: AxisId | null | undefined;
+  onSelectRepeater?: ((id: CircularRepeaterId) => void) | undefined;
+  selectedCircularRepeaterId?: CircularRepeaterId | null | undefined;
   depth: number;
 }) {
   const evolu = useEvolu();
@@ -438,10 +538,20 @@ function PlaceTreeNode(props: {
   const circularFieldsForThisPlace = () =>
     props.circularFields.filter((f) => f.placeId === props.place.id);
   const axesForThisPlace = () =>
-    (props.axes ?? []).filter((a) => a.placeId === props.place.id);
+    (props.axes ?? []).filter(
+      (a) =>
+        a.placeId === props.place.id &&
+        (a as { circularRepeaterId?: unknown }).circularRepeaterId == null,
+    );
+  const circularRepeatersForThisPlace = () =>
+    (props.circularRepeaters ?? []).filter((r) => r.placeId === props.place.id);
   const placesOnAxis = (axisId: AxisId) =>
     props.places.filter(
       (p) => (p as PlaceWithAxis).parentAxisId === axisId,
+    ) as PlaceWithAxis[];
+  const placesOnCircularField = (cfId: CircularFieldId) =>
+    props.places.filter(
+      (p) => (p as PlaceWithAxis).parentCircularFieldId === cfId,
     ) as PlaceWithAxis[];
   const indentClass =
     listIndentClasses[Math.min(props.depth, listIndentClasses.length - 1)];
@@ -562,11 +672,48 @@ function PlaceTreeNode(props: {
         </span>
       </li>
       {circularFieldsForThisPlace().map((field) => (
-        <CircularFieldTreeNode field={field} depth={props.depth + 1} />
+        <CircularFieldTreeNode
+          field={field}
+          placesOnCircularField={placesOnCircularField(field.id)}
+          places={props.places as PlaceWithAxis[]}
+          ends={props.ends}
+          segments={props.segments}
+          circularFields={props.circularFields}
+          bendingCircularFields={props.bendingCircularFields}
+          axes={props.axes ?? []}
+          circularRepeaters={props.circularRepeaters ?? []}
+          depth={props.depth + 1}
+          onSelectAxis={props.onSelectAxis}
+          selectedAxisId={props.selectedAxisId}
+          onSelectRepeater={props.onSelectRepeater}
+          selectedCircularRepeaterId={props.selectedCircularRepeaterId}
+        />
+      ))}
+      {circularRepeatersForThisPlace().map((repeater) => (
+        <li
+          class={`${classes.listRowWithIndicator} ${classes.listItem} ${props.selectedCircularRepeaterId === repeater.id ? 'ring-1 ring-green-400 rounded' : ''}`}
+          title={repeater.id}
+        >
+          <span class={classes.listScaffoldingIndicator}>#</span>
+          <span class={`${indentClass} flex-1 min-w-0`}>
+            <button
+              type="button"
+              class={classes.listItemPlaceButton}
+              onClick={() => props.onSelectRepeater?.(repeater.id)}
+            >
+              Circular Repeater ({Number(repeater.count)} axes)
+            </button>
+          </span>
+        </li>
       ))}
       {axesForThisPlace().map((axis) => (
         <AxisTreeNode
-          axis={{ id: axis.id, placeId: axis.placeId, angle: Number(axis.angle) }}
+          axis={{
+            id: axis.id,
+            placeId: axis.placeId,
+            angle: Number(axis.angle),
+            isBidirectional: axis.isBidirectional ?? null,
+          }}
           placesOnAxis={placesOnAxis(axis.id)}
           places={props.places as PlaceWithAxis[]}
           ends={props.ends}
@@ -597,8 +744,11 @@ function PlaceTreeNode(props: {
           circularFields={props.circularFields}
           bendingCircularFields={props.bendingCircularFields}
           axes={props.axes ?? []}
+          circularRepeaters={props.circularRepeaters ?? []}
           onSelectAxis={props.onSelectAxis}
           selectedAxisId={props.selectedAxisId}
+          onSelectRepeater={props.onSelectRepeater}
+          selectedCircularRepeaterId={props.selectedCircularRepeaterId}
           depth={props.depth + 1}
         />
       ))}
@@ -609,6 +759,8 @@ function PlaceTreeNode(props: {
 const DrawingObjectsList: Component<{
   selectedAxisId?: AxisId | null | undefined;
   onSelectAxis?: ((id: AxisId) => void) | undefined;
+  selectedCircularRepeaterId?: CircularRepeaterId | null | undefined;
+  onSelectRepeater?: ((id: CircularRepeaterId) => void) | undefined;
 }> = (props) => {
   const { rows } = useQuery(allPlacesQuery);
   const { rows: endsRows } = useQuery(allLineSegmentEndsQuery);
@@ -618,7 +770,14 @@ const DrawingObjectsList: Component<{
     allBendingCircularFieldsQuery,
   );
   const { rows: axesRows } = useQuery(allAxesQuery);
-  const roots = () => rows().filter((p) => p.parentId === null);
+  const { rows: circularRepeatersRows } = useQuery(allCircularRepeatersQuery);
+  const roots = () =>
+    rows().filter(
+      (p) =>
+        p.parentId === null &&
+        (p as PlaceWithAxis).parentAxisId == null &&
+        (p as PlaceWithAxis).parentCircularFieldId == null,
+    );
   const axes = () =>
     axesRows().filter(
       (a): a is typeof a & { placeId: PlaceId } => a.placeId != null,
@@ -630,6 +789,14 @@ const DrawingObjectsList: Component<{
         id: f.id,
         placeId: f.placeId,
         radius: Number(f.radius),
+      }));
+  const circularRepeaters = () =>
+    circularRepeatersRows()
+      .filter((r): r is typeof r & { placeId: PlaceId } => r.placeId != null)
+      .map((r) => ({
+        id: r.id,
+        placeId: r.placeId,
+        count: Number(r.count),
       }));
   const bendingCircularFields = () =>
     bendingCircularFieldsRows()
@@ -682,9 +849,15 @@ const DrawingObjectsList: Component<{
                 id: a.id,
                 placeId: a.placeId,
                 angle: Number(a.angle),
+                isBidirectional: a.isBidirectional,
               }))}
+              circularRepeaters={circularRepeaters()}
               onSelectAxis={props.onSelectAxis ?? undefined}
               selectedAxisId={props.selectedAxisId ?? undefined}
+              onSelectRepeater={props.onSelectRepeater ?? undefined}
+              selectedCircularRepeaterId={
+                props.selectedCircularRepeaterId ?? undefined
+              }
               depth={1}
             />
           ))}

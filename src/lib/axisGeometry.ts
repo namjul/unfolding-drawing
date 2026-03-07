@@ -48,11 +48,16 @@ export type ViewportCanvas = {
   height: number;
 };
 
+export type AxisSegmentInViewportOptions = {
+  unidirectional?: boolean;
+};
+
 /**
  * Intersection of an infinite line with a rectangle.
  * Line: origin + t * (cos(angle), sin(angle)) for t in (-inf, +inf).
  * Returns the segment (x1,y1)-(x2,y2) that lies inside the viewport, or null if no intersection.
  * Expands the viewport by margin so the line extends slightly past the visible edges.
+ * When options.unidirectional is true, segment is from origin only in the positive angle direction (t >= 0).
  */
 export function axisSegmentInViewport(
   originX: number,
@@ -60,6 +65,7 @@ export function axisSegmentInViewport(
   angle: number,
   viewport: ViewportCanvas,
   margin = 100,
+  options?: AxisSegmentInViewportOptions,
 ): { x1: number; y1: number; x2: number; y2: number } {
   const dx = Math.cos(angle);
   const dy = Math.sin(angle);
@@ -86,7 +92,27 @@ export function axisSegmentInViewport(
     if (xAtBottom >= left && xAtBottom <= right) ts.push(tBottom);
   }
 
-  const validTs = ts.filter((t) => Number.isFinite(t));
+  let validTs = ts.filter((t) => Number.isFinite(t));
+  if (options?.unidirectional) {
+    validTs = validTs.filter((t) => t >= 0);
+    if (validTs.length === 0) {
+      const tShort = 50;
+      return {
+        x1: originX,
+        y1: originY,
+        x2: originX + tShort * dx,
+        y2: originY + tShort * dy,
+      };
+    }
+    const tMax = Math.max(...validTs);
+    return {
+      x1: originX,
+      y1: originY,
+      x2: originX + tMax * dx,
+      y2: originY + tMax * dy,
+    };
+  }
+
   if (validTs.length < 2) {
     const tMin = -10000;
     const tMax = 10000;

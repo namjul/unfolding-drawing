@@ -86,12 +86,8 @@ export function chooseParentForSplitPlace(
     return placeAId;
   }
 
-  const distA = Math.abs(
-    distanceToParentAxis(placeAId, places, placesWithAbs),
-  );
-  const distB = Math.abs(
-    distanceToParentAxis(placeBId, places, placesWithAbs),
-  );
+  const distA = Math.abs(distanceToParentAxis(placeAId, places, placesWithAbs));
+  const distB = Math.abs(distanceToParentAxis(placeBId, places, placesWithAbs));
   if (distA < distB) return placeAId;
   if (distB < distA) return placeBId;
 

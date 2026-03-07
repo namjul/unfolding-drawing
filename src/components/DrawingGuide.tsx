@@ -4,6 +4,7 @@ import type {
   AxisId,
   BendingCircularFieldId,
   CircularFieldId,
+  CircularRepeaterId,
   LineSegmentId,
   PlaceId,
 } from '../lib/evolu-db';
@@ -29,6 +30,7 @@ interface DrawingGuideProps {
   selectedCircularFieldId: CircularFieldId | null;
   selectedBendingCircularFieldId: BendingCircularFieldId | null;
   selectedAxisId: AxisId | null;
+  selectedCircularRepeaterId: CircularRepeaterId | null;
   transformChoice: TransformChoice;
   onStepObserve: () => void;
   onStepSelect: () => void;
@@ -57,6 +59,14 @@ interface DrawingGuideProps {
   pendingModifyAxis: boolean;
   pendingDeleteAxisId: boolean;
   pendingAddPlaceOnAxis: boolean;
+  pendingAddPlaceOnCircularField: boolean;
+  pendingAddCircularRepeater: boolean;
+  pendingModifyCircularRepeater: boolean;
+  pendingAddPlaceOnCircularRepeater: boolean;
+  pendingModifyPlaceOnCircularRepeater: boolean;
+  pendingDeleteCircularRepeaterId: boolean;
+  circularRepeaterCount: number;
+  onRepeaterCountChange: (count: number) => void;
   bendAtEndsState: {
     endALabel: string;
     endBLabel: string;
@@ -64,6 +74,10 @@ interface DrawingGuideProps {
     hasBendAtB: boolean;
     onToggleBendAtA: () => void;
     onToggleBendAtB: () => void;
+  } | null;
+  axisDirection: {
+    isBidirectional: boolean;
+    onDirectionChange: (isBidirectional: boolean) => void;
   } | null;
   availableTransforms: readonly {
     id: NonNullable<TransformChoice>;
@@ -120,6 +134,8 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
     if (props.selectedLineSegmentId) return 'Line segment';
     if (props.selectedCircularFieldId) return 'Circular field';
     if (props.selectedBendingCircularFieldId) return 'Bending field';
+    if (props.selectedAxisId) return 'Axis';
+    if (props.selectedCircularRepeaterId) return 'Circular repeater';
     return 'Select the object you want to change?';
   };
 
@@ -148,6 +164,18 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
     if (props.transformChoice === 'modifyAxis') return 'Modify Axis';
     if (props.transformChoice === 'deleteAxis') return 'Delete Axis';
     if (props.transformChoice === 'addPlaceOnAxis') return 'Add place on axis';
+    if (props.transformChoice === 'addPlaceOnCircularField')
+      return 'Add place on circular field';
+    if (props.transformChoice === 'addCircularRepeater')
+      return 'Add Circular Repeater';
+    if (props.transformChoice === 'modifyCircularRepeater')
+      return 'Modify Circular Repeater';
+    if (props.transformChoice === 'deleteCircularRepeater')
+      return 'Delete Circular Repeater';
+    if (props.transformChoice === 'addPlaceOnCircularRepeater')
+      return 'Add place on repeater';
+    if (props.transformChoice === 'modifyPlaceOnCircularRepeater')
+      return 'Move Place';
     return 'Select the change you want to make.';
   };
 
@@ -179,7 +207,13 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
       props.pendingAddAxis ||
       props.pendingModifyAxis ||
       props.pendingDeleteAxisId ||
-      props.pendingAddPlaceOnAxis
+      props.pendingAddPlaceOnAxis ||
+      props.pendingAddPlaceOnCircularField ||
+      props.pendingAddCircularRepeater ||
+      props.pendingModifyCircularRepeater ||
+      props.pendingAddPlaceOnCircularRepeater ||
+      props.pendingModifyPlaceOnCircularRepeater ||
+      props.pendingDeleteCircularRepeaterId
     );
   };
 
@@ -265,7 +299,8 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                 props.selectedLineSegmentId ||
                 props.selectedCircularFieldId ||
                 props.selectedBendingCircularFieldId ||
-                props.selectedAxisId) && (
+                props.selectedAxisId ||
+                props.selectedCircularRepeaterId) && (
                 <button
                   type="button"
                   class={classes.buttonCancelSelection}
@@ -445,6 +480,88 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                     <p class={classes.guideText}>
                       The bending field will be removed. Keep to confirm or
                       discard to cancel.
+                    </p>
+                  )}
+                  {(props.transformChoice === 'addAxis' ||
+                    props.transformChoice === 'modifyAxis') &&
+                    props.axisDirection && (
+                      <>
+                        <p class={classes.guideText}>
+                          Drag the axis to set its orientation. Choose whether
+                          the axis extends in both directions or one direction
+                          only.
+                        </p>
+                        <div class="mt-3 flex flex-col gap-2">
+                          <label class="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="axis-direction"
+                              checked={props.axisDirection.isBidirectional}
+                              onChange={() =>
+                                props.axisDirection?.onDirectionChange(true)
+                              }
+                              class="rounded-full border-slate-300"
+                            />
+                            <span class="text-sm">Both directions</span>
+                          </label>
+                          <label class="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="axis-direction"
+                              checked={!props.axisDirection.isBidirectional}
+                              onChange={() =>
+                                props.axisDirection?.onDirectionChange(false)
+                              }
+                              class="rounded-full border-slate-300"
+                            />
+                            <span class="text-sm">One direction</span>
+                          </label>
+                        </div>
+                      </>
+                    )}
+                  {(props.transformChoice === 'addCircularRepeater' ||
+                    props.transformChoice === 'modifyCircularRepeater') && (
+                    <>
+                      <p class={classes.guideText}>
+                        {props.transformChoice === 'addCircularRepeater'
+                          ? 'Set the number of axes (repetitions) that will emanate from the place.'
+                          : 'Change the number of axes.'}
+                      </p>
+                      <div class="mt-3 flex items-center gap-2">
+                        <label class="text-sm" for="repeater-count">
+                          Number of axes
+                        </label>
+                        <input
+                          id="repeater-count"
+                          type="number"
+                          min={2}
+                          max={24}
+                          value={props.circularRepeaterCount}
+                          onInput={(e) => {
+                            const n = Number(
+                              (e.target as HTMLInputElement).value,
+                            );
+                            if (Number.isFinite(n))
+                              props.onRepeaterCountChange(n);
+                          }}
+                          class="w-20 rounded border border-slate-300 px-2 py-1 text-sm"
+                        />
+                      </div>
+                    </>
+                  )}
+                  {(props.transformChoice === 'addPlaceOnCircularRepeater' ||
+                    props.transformChoice ===
+                      'modifyPlaceOnCircularRepeater') && (
+                    <p class={classes.guideText}>
+                      {props.transformChoice === 'addPlaceOnCircularRepeater'
+                        ? 'Click to set position; drag to move. Keep to add a place on every axis.'
+                        : 'Drag any echo to move all together.'}
+                    </p>
+                  )}
+                  {props.transformChoice === 'deleteCircularRepeater' && (
+                    <p class={classes.guideText}>
+                      The circular repeater and its axes will be removed. Keep
+                      to confirm or discard to cancel.
                     </p>
                   )}
                   {props.transformChoice === 'bendAtEnds' &&

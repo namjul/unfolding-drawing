@@ -115,9 +115,9 @@ export const svg = {
   placeRelationCircleDasharray: '4 4',
 
   // Orientation axis
-  orientationAxisStroke: 'black',
-  orientationAxisStrokeWidth: 2,
-  orientationAxisDasharray: '6 3',
+  orientationAxisStroke: '#999999',
+  orientationAxisStrokeWidth: 1,
+  orientationAxisDasharray: '4 4',
   orientationAxisFill: 'black',
 
   // Line segments
@@ -152,6 +152,10 @@ export const svg = {
   // Delete placeholder
   deletePlaceholderStroke: 'red',
   deletePlaceholderStrokeWidth: 3,
+
+  // Handle (grip cue for transformations)
+  handleFill: 'green',
+  handleSize: 6,
 
   // Inline style objects for SVG elements
   pointerEventsNone: { 'pointer-events': 'none' as const },
