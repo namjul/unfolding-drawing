@@ -77,6 +77,9 @@ export const classes = {
   listIndent2: 'pl-8',
   listIndent3: 'pl-12',
   listIndent4: 'pl-16',
+  listIndent5: 'pl-20',
+  listIndent6: 'pl-24',
+  listIndent7: 'pl-28',
   listScaffoldingIndicator: 'w-4 shrink-0 text-slate-400 text-xs',
   listRowWithIndicator: 'flex items-center gap-1 min-w-0',
 } as const;
@@ -87,6 +90,9 @@ export const listIndentClasses = [
   classes.listIndent2,
   classes.listIndent3,
   classes.listIndent4,
+  classes.listIndent5,
+  classes.listIndent6,
+  classes.listIndent7,
 ] as const;
 
 // ViewControls
@@ -119,6 +125,12 @@ export const svg = {
   orientationAxisStrokeWidth: 1,
   orientationAxisDasharray: '4 4',
   orientationAxisFill: 'black',
+
+  // Axis number label (when repeater selected)
+  axisLabelFontSize: 16,
+  axisLabelOffset: 80,
+  /** Distance from the axis line (perpendicular) so the label sits beside the axis. */
+  axisLabelDistanceFromAxis: 14,
 
   // Line segments
   lineSegmentUnselectedStroke: '#374151',

@@ -106,6 +106,9 @@ export const Schema = {
     angle: nullOr(FiniteNumber),
     name: nullOr(String1000),
     isScaffolding: nullOr(FiniteNumber),
+    alternatingShow: nullOr(FiniteNumber),
+    alternatingSkip: nullOr(FiniteNumber),
+    alternatingStart: nullOr(FiniteNumber),
   },
   axis: {
     id: AxisId,
@@ -118,6 +121,7 @@ export const Schema = {
     id: CircularRepeaterId,
     placeId: PlaceId,
     count: FiniteNumber,
+    name: nullOr(String1000),
   },
   lineSegmentEnd: {
     id: LineSegmentEndId,
@@ -161,6 +165,9 @@ export const Schema = {
     angleOnCircle: nullOr(FiniteNumber),
     axisIsBidirectional: nullOr(FiniteNumber),
     circularRepeaterId: nullOr(CircularRepeaterId),
+    alternatingShow: nullOr(FiniteNumber),
+    alternatingSkip: nullOr(FiniteNumber),
+    alternatingStart: nullOr(FiniteNumber),
   },
 } satisfies EvoluSchema;
 

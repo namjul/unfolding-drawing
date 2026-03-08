@@ -44,6 +44,7 @@ function AxisTreeNode(props: {
     angle: number;
     isBidirectional?: number | null;
   };
+  axisLabel?: string;
   placesOnAxis: ReadonlyArray<PlaceWithAxis>;
   places: ReadonlyArray<PlaceWithAxis>;
   ends: ReadonlyArray<{
@@ -75,6 +76,9 @@ function AxisTreeNode(props: {
   const indentClass =
     listIndentClasses[Math.min(props.depth, listIndentClasses.length - 1)];
   const isSelected = () => props.selectedAxisId === props.axis.id;
+  const label = () =>
+    props.axisLabel ??
+    `Axis ${props.axis.isBidirectional === 0 ? '→' : '↔'}`;
   return (
     <>
       <li
@@ -88,7 +92,7 @@ function AxisTreeNode(props: {
             class={classes.listItemPlaceButton}
             onClick={() => props.onSelectAxis?.(props.axis.id)}
           >
-            Axis {props.axis.isBidirectional === 0 ? '→' : '↔'}
+            {label()}
           </button>
         </span>
       </li>
@@ -158,6 +162,7 @@ function CircularFieldTreeNode(props: {
     id: CircularRepeaterId;
     placeId: PlaceId;
     count: number;
+    name: string | null;
   }>;
   depth: number;
   onSelectAxis?: ((id: AxisId) => void) | undefined;
@@ -520,6 +525,7 @@ function PlaceTreeNode(props: {
     id: CircularRepeaterId;
     placeId: PlaceId;
     count: number;
+    name: string | null;
   }>;
   onSelectAxis?: ((id: AxisId) => void) | undefined;
   selectedAxisId?: AxisId | null | undefined;
@@ -545,6 +551,15 @@ function PlaceTreeNode(props: {
     );
   const circularRepeatersForThisPlace = () =>
     (props.circularRepeaters ?? []).filter((r) => r.placeId === props.place.id);
+  const axesForRepeater = (repeaterId: CircularRepeaterId) =>
+    [...(props.axes ?? [])]
+      .filter(
+        (a) =>
+          a.placeId === props.place.id &&
+          (a as { circularRepeaterId?: CircularRepeaterId }).circularRepeaterId ===
+            repeaterId,
+      )
+      .sort((a, b) => Number(a.angle) - Number(b.angle));
   const placesOnAxis = (axisId: AxisId) =>
     props.places.filter(
       (p) => (p as PlaceWithAxis).parentAxisId === axisId,
@@ -630,13 +645,23 @@ function PlaceTreeNode(props: {
     setIsEditing(false);
   };
 
+  const hasChildren =
+    circularFieldsForThisPlace().length > 0 ||
+    circularRepeatersForThisPlace().length > 0 ||
+    axesForThisPlace().length > 0 ||
+    endsForThisPlace().length > 0 ||
+    childPlaces().length > 0;
+
   return (
-    <>
-      <li
+    <li
+      title={`${props.place.id} (${props.place.x}, ${props.place.y})${
+        props.place.parentId ? ' relative to parent' : ''
+      }`}
+    >
+      <div
         class={`${classes.listRowWithIndicator} ${classes.listItem}`}
-        title={`${props.place.id} (${props.place.x}, ${props.place.y})${
-          props.place.parentId ? ' relative to parent' : ''
-        }`}
+        role="treeitem"
+        aria-expanded={hasChildren ? true : undefined}
       >
         <span class={classes.listScaffoldingIndicator}>
           {showScaffolding() ? '#' : '\u00A0'}
@@ -670,89 +695,116 @@ function PlaceTreeNode(props: {
             </div>
           )}
         </span>
-      </li>
-      {circularFieldsForThisPlace().map((field) => (
-        <CircularFieldTreeNode
-          field={field}
-          placesOnCircularField={placesOnCircularField(field.id)}
-          places={props.places as PlaceWithAxis[]}
-          ends={props.ends}
-          segments={props.segments}
-          circularFields={props.circularFields}
-          bendingCircularFields={props.bendingCircularFields}
-          axes={props.axes ?? []}
-          circularRepeaters={props.circularRepeaters ?? []}
-          depth={props.depth + 1}
-          onSelectAxis={props.onSelectAxis}
-          selectedAxisId={props.selectedAxisId}
-          onSelectRepeater={props.onSelectRepeater}
-          selectedCircularRepeaterId={props.selectedCircularRepeaterId}
-        />
-      ))}
-      {circularRepeatersForThisPlace().map((repeater) => (
-        <li
-          class={`${classes.listRowWithIndicator} ${classes.listItem} ${props.selectedCircularRepeaterId === repeater.id ? 'ring-1 ring-green-400 rounded' : ''}`}
-          title={repeater.id}
-        >
-          <span class={classes.listScaffoldingIndicator}>#</span>
-          <span class={`${indentClass} flex-1 min-w-0`}>
-            <button
-              type="button"
-              class={classes.listItemPlaceButton}
-              onClick={() => props.onSelectRepeater?.(repeater.id)}
-            >
-              Circular Repeater ({Number(repeater.count)} axes)
-            </button>
-          </span>
-        </li>
-      ))}
-      {axesForThisPlace().map((axis) => (
-        <AxisTreeNode
-          axis={{
-            id: axis.id,
-            placeId: axis.placeId,
-            angle: Number(axis.angle),
-            isBidirectional: axis.isBidirectional ?? null,
-          }}
-          placesOnAxis={placesOnAxis(axis.id)}
-          places={props.places as PlaceWithAxis[]}
-          ends={props.ends}
-          segments={props.segments}
-          circularFields={props.circularFields}
-          bendingCircularFields={props.bendingCircularFields}
-          depth={props.depth + 1}
-          onSelectAxis={props.onSelectAxis}
-          selectedAxisId={props.selectedAxisId}
-        />
-      ))}
-      {endsForThisPlace().map((end) => (
-        <LineSegmentEndTreeNode
-          endId={end.id}
-          ends={props.ends}
-          segments={props.segments}
-          places={props.places}
-          bendingCircularFields={props.bendingCircularFields}
-          depth={props.depth + 1}
-        />
-      ))}
-      {childPlaces().map((c) => (
-        <PlaceTreeNode
-          place={c}
-          places={props.places}
-          ends={props.ends}
-          segments={props.segments}
-          circularFields={props.circularFields}
-          bendingCircularFields={props.bendingCircularFields}
-          axes={props.axes ?? []}
-          circularRepeaters={props.circularRepeaters ?? []}
-          onSelectAxis={props.onSelectAxis}
-          selectedAxisId={props.selectedAxisId}
-          onSelectRepeater={props.onSelectRepeater}
-          selectedCircularRepeaterId={props.selectedCircularRepeaterId}
-          depth={props.depth + 1}
-        />
-      ))}
-    </>
+      </div>
+      {hasChildren && (
+        <ul class="list-none text-xs space-y-1 border-l border-slate-200 ml-2 pl-2">
+          {circularFieldsForThisPlace().map((field) => (
+            <CircularFieldTreeNode
+              field={field}
+              placesOnCircularField={placesOnCircularField(field.id)}
+              places={props.places as PlaceWithAxis[]}
+              ends={props.ends}
+              segments={props.segments}
+              circularFields={props.circularFields}
+              bendingCircularFields={props.bendingCircularFields}
+              axes={props.axes ?? []}
+              circularRepeaters={props.circularRepeaters ?? []}
+              depth={props.depth + 1}
+              onSelectAxis={props.onSelectAxis}
+              selectedAxisId={props.selectedAxisId}
+              onSelectRepeater={props.onSelectRepeater}
+              selectedCircularRepeaterId={props.selectedCircularRepeaterId}
+            />
+          ))}
+          {circularRepeatersForThisPlace().map((repeater) => (
+            <>
+              <li
+                class={`${classes.listRowWithIndicator} ${classes.listItem} ${props.selectedCircularRepeaterId === repeater.id ? 'ring-1 ring-green-400 rounded' : ''}`}
+                title={repeater.id}
+              >
+                <span class={classes.listScaffoldingIndicator}>#</span>
+                <span class={`${indentClass} flex-1 min-w-0`}>
+                  <button
+                    type="button"
+                    class={classes.listItemPlaceButton}
+                    onClick={() => props.onSelectRepeater?.(repeater.id)}
+                  >
+                    {repeater.name?.trim() ||
+                      `Repeater (${Number(repeater.count)} axes)`}
+                  </button>
+                </span>
+              </li>
+              {axesForRepeater(repeater.id).map((axis, i) => (
+                <AxisTreeNode
+                  axis={{
+                    id: axis.id,
+                    placeId: axis.placeId,
+                    angle: Number(axis.angle),
+                    isBidirectional: axis.isBidirectional ?? null,
+                  }}
+                  axisLabel={`Axis ${i + 1}`}
+                  placesOnAxis={placesOnAxis(axis.id)}
+                  places={props.places as PlaceWithAxis[]}
+                  ends={props.ends}
+                  segments={props.segments}
+                  circularFields={props.circularFields}
+                  bendingCircularFields={props.bendingCircularFields}
+                  depth={props.depth + 1}
+                  onSelectAxis={props.onSelectAxis}
+                  selectedAxisId={props.selectedAxisId}
+                />
+              ))}
+            </>
+          ))}
+          {axesForThisPlace().map((axis) => (
+            <AxisTreeNode
+              axis={{
+                id: axis.id,
+                placeId: axis.placeId,
+                angle: Number(axis.angle),
+                isBidirectional: axis.isBidirectional ?? null,
+              }}
+              placesOnAxis={placesOnAxis(axis.id)}
+              places={props.places as PlaceWithAxis[]}
+              ends={props.ends}
+              segments={props.segments}
+              circularFields={props.circularFields}
+              bendingCircularFields={props.bendingCircularFields}
+              depth={props.depth + 1}
+              onSelectAxis={props.onSelectAxis}
+              selectedAxisId={props.selectedAxisId}
+            />
+          ))}
+          {endsForThisPlace().map((end) => (
+            <LineSegmentEndTreeNode
+              endId={end.id}
+              ends={props.ends}
+              segments={props.segments}
+              places={props.places}
+              bendingCircularFields={props.bendingCircularFields}
+              depth={props.depth + 1}
+            />
+          ))}
+          {childPlaces().map((c) => (
+            <PlaceTreeNode
+              place={c}
+              places={props.places}
+              ends={props.ends}
+              segments={props.segments}
+              circularFields={props.circularFields}
+              bendingCircularFields={props.bendingCircularFields}
+              axes={props.axes ?? []}
+              circularRepeaters={props.circularRepeaters ?? []}
+              onSelectAxis={props.onSelectAxis}
+              selectedAxisId={props.selectedAxisId}
+              onSelectRepeater={props.onSelectRepeater}
+              selectedCircularRepeaterId={props.selectedCircularRepeaterId}
+              depth={props.depth + 1}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 
@@ -797,6 +849,7 @@ const DrawingObjectsList: Component<{
         id: r.id,
         placeId: r.placeId,
         count: Number(r.count),
+        name: r.name ?? null,
       }));
   const bendingCircularFields = () =>
     bendingCircularFieldsRows()
@@ -850,6 +903,8 @@ const DrawingObjectsList: Component<{
                 placeId: a.placeId,
                 angle: Number(a.angle),
                 isBidirectional: a.isBidirectional,
+                circularRepeaterId: (a as { circularRepeaterId?: CircularRepeaterId })
+                  .circularRepeaterId,
               }))}
               circularRepeaters={circularRepeaters()}
               onSelectAxis={props.onSelectAxis ?? undefined}

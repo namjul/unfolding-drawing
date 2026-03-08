@@ -203,6 +203,9 @@ export type RecordAddPlaceOnCircularRepeater = {
   circularRepeaterId: CircularRepeaterId;
   placeId: PlaceId;
   distanceAlongAxis: number;
+  alternatingShow?: number;
+  alternatingSkip?: number;
+  alternatingStart?: number;
 };
 
 /** Payload for modify place on circular repeater (move echo set). */
@@ -212,6 +215,9 @@ export type RecordModifyPlaceOnCircularRepeater = {
   circularRepeaterId: CircularRepeaterId;
   distanceAlongAxis: number;
   distanceFromAxis: number;
+  alternatingShow?: number;
+  alternatingSkip?: number;
+  alternatingStart?: number;
 };
 
 export type TransformationRecord =
@@ -584,6 +590,9 @@ export function recordTransformation(data: TransformationRecord): void {
         angleOnCircle: null,
         axisIsBidirectional: null,
         circularRepeaterId: data.circularRepeaterId,
+        alternatingShow: data.alternatingShow ?? null,
+        alternatingSkip: data.alternatingSkip ?? null,
+        alternatingStart: data.alternatingStart ?? null,
       });
       break;
     case 'modifyPlaceOnCircularRepeater':
@@ -604,6 +613,9 @@ export function recordTransformation(data: TransformationRecord): void {
         angleOnCircle: null,
         axisIsBidirectional: null,
         circularRepeaterId: data.circularRepeaterId,
+        alternatingShow: data.alternatingShow ?? null,
+        alternatingSkip: data.alternatingSkip ?? null,
+        alternatingStart: data.alternatingStart ?? null,
       });
       break;
   }

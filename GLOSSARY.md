@@ -779,6 +779,21 @@ When an echo drawing object is modified, all its echoes are modified in the same
 ### Echo Group
 A set of related drawing object echoes within a repeater.
 
+### Circular Repeater
+A circular repeater is a scaffolding drawing object generates a number of unidirectional axes that emanate from its center. 
+Places added to the repeater in relation to any of its axis are repeated on its axes.
+
+### Alternating Repetition
+In a repeater an alternating repetition pattern can be applied to a drawing object.
+Different drawing objects within the same repeater can have different repetition patterns.
+An alternating pattern is dictates on which nodes a drawing object should exist and on which nodes it should not exist. 
+The alternating pattern is expressed as: number of continuous nodes to show and number of continuous nodes to skip.
+Example 1 - a basic alternating pattern is: show 1, hide 1; eg: in a 16 node circular repeater this would cause a drawing object to appear on every other nodes - 8 in total.
+Example 2 - a pattern of show2, hide2; eg: in a 16 node circular repeater this would cause a drawing object to appear on 4 pairs (also a total of 8 instances) of axes with 4 pairs of axes with no drawing object.
+Example 3 - a pattern of show3, hide1; eg: in a 16 node circular repeater this would cause a drawing object to appear 4 times on 3 continuous axes with one empty axis between each set of 3. 
+When a alternating repetition pattern is created a user can decide on which axis in the repeater it should begin.
+This would make it possible, for example, to create different repetitions on odd and even axes.  
+
 ## Orhpaned Echo
 An echo drawing object can be removed from its repeater and continue to exist as an independent drawing object, when this happens it becomes an orphan. 
 An orphaned echo drawing object does not change when any of its formerly related drawing objects are csuggesthanged. 

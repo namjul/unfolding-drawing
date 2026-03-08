@@ -66,6 +66,8 @@ const CIRCULAR_FIELD_RADIUS_HANDLE_THRESHOLD = 12;
 const CIRCULAR_FIELD_HIT_THRESHOLD = 12;
 const BENDING_FIELD_HIT_THRESHOLD = 12;
 const BENDING_FIELD_RADIUS_HANDLE_THRESHOLD = 12;
+/** When adding/dragging a place on a repeater, snap onto the axis if within this distance (canvas units). */
+const AXIS_MAGNETIC_THRESHOLD = 16;
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
@@ -192,6 +194,9 @@ const App: Component = () => {
   ] = createSignal<{
     placeId: PlaceId;
     circularRepeaterId: CircularRepeaterId;
+    alternatingShow?: number | null;
+    alternatingSkip?: number | null;
+    alternatingStart?: number | null;
   } | null>(null);
 
   const [bendAtEndsDirty, setBendAtEndsDirty] = createSignal(false);
@@ -446,6 +451,9 @@ const App: Component = () => {
     circularRepeaterId: CircularRepeaterId;
     distanceAlongAxis: number;
     distanceFromAxis?: number;
+    alternatingShow?: number;
+    alternatingSkip?: number;
+    alternatingStart?: number;
   } | null>(null);
   const [pendingDeleteCircularRepeaterId, setPendingDeleteCircularRepeaterId] =
     createSignal<CircularRepeaterId | null>(null);
@@ -491,15 +499,72 @@ const App: Component = () => {
   function nextPlaceName(
     placesList: ReadonlyArray<{ name: string | null }>,
   ): string {
-    const placeNumPattern = /^Place (\d+)$/;
+    const placeNumOnly = /^Place (\d+)$/;
+    const placeNumEcho = /^Place (\d+) Echo \d+$/;
     let max = 0;
     for (const p of placesList) {
       const name = p.name?.trim();
       if (!name) continue;
-      const m = placeNumPattern.exec(name);
-      if (m && m[1] != null) max = Math.max(max, Number.parseInt(m[1], 10));
+      let m = placeNumOnly.exec(name);
+      if (m && m[1] != null) {
+        max = Math.max(max, Number.parseInt(m[1], 10));
+        continue;
+      }
+      m = placeNumEcho.exec(name);
+      if (m && m[1] != null)
+        max = Math.max(max, Number.parseInt(m[1], 10));
     }
     return `Place ${max + 1}`;
+  }
+
+  function nextRepeaterName(
+    repeatersList: ReadonlyArray<{ name: string | null }>,
+  ): string {
+    const repeaterNumPattern = /^Repeater (\d+)$/;
+    let max = 0;
+    for (const r of repeatersList) {
+      const name = r.name?.trim();
+      if (!name) continue;
+      const m = repeaterNumPattern.exec(name);
+      if (m && m[1] != null)
+        max = Math.max(max, Number.parseInt(m[1], 10));
+    }
+    return `Repeater ${max + 1}`;
+  }
+
+  /** Axis id for a place in a repeater echo group (the place or an ancestor has parentAxisId). */
+  function getAxisIdForEcho(
+    place: { parentAxisId?: AxisId | null; parentId?: PlaceId | null },
+    placesList: ReadonlyArray<{
+      id: PlaceId;
+      parentAxisId?: AxisId | null;
+      parentId?: PlaceId | null;
+    }>,
+  ): AxisId | null {
+    if (place.parentAxisId != null) return place.parentAxisId;
+    if (place.parentId == null) return null;
+    const parent = placesList.find((p) => p.id === place.parentId);
+    return parent ? getAxisIdForEcho(parent, placesList) : null;
+  }
+
+  /** All place ids reachable by following parentId from the given place (excluding the root). */
+  function getDescendantPlaceIds(
+    placeId: PlaceId,
+    placesList: ReadonlyArray<{ id: PlaceId; parentId?: PlaceId | null }>,
+  ): PlaceId[] {
+    const result: PlaceId[] = [];
+    let queue = placesList
+      .filter((p) => p.parentId === placeId)
+      .map((p) => p.id);
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      result.push(id);
+      const children = placesList
+        .filter((p) => p.parentId === id)
+        .map((p) => p.id);
+      queue = queue.concat(children);
+    }
+    return result;
   }
 
   function nextLineSegmentName(
@@ -687,6 +752,44 @@ const App: Component = () => {
     };
   };
 
+  /** Axis number (1-based) for a circular repeater axis, stable under repeater rotation. */
+  const circularRepeaterAxisNumber = (
+    axisId: AxisId,
+    circularRepeaterId: CircularRepeaterId,
+    axesList: ReadonlyArray<{
+      id: AxisId;
+      angle: unknown;
+      circularRepeaterId?: CircularRepeaterId | null;
+    }>,
+  ): number => {
+    const repAxes = axesList.filter(
+      (a) => a.circularRepeaterId === circularRepeaterId,
+    );
+    const sorted = [...repAxes].sort(
+      (a, b) => Number(a.angle) - Number(b.angle),
+    );
+    const idx = sorted.findIndex((a) => a.id === axisId);
+    return idx >= 0 ? idx + 1 : 0;
+  };
+
+  /** Whether a 1-based axis number is in the alternating pattern (show/skip/start). No pattern (nulls) = all axes. */
+  const inAxisAlternatingPattern = (
+    axisNumber1Based: number,
+    start: number | null | undefined,
+    show: number | null | undefined,
+    skip: number | null | undefined,
+    axisCount: number,
+  ): boolean => {
+    const s = start ?? 1;
+    const sh = show ?? 1;
+    const sk = skip ?? 0;
+    if (axisCount <= 0) return false;
+    const period = sh + sk;
+    if (period <= 0) return true;
+    const step = ((axisNumber1Based - s + axisCount) % axisCount + axisCount) % axisCount;
+    return step % period < sh;
+  };
+
   /** Given a repeater and a world point, return (distanceAlongAxis, distanceFromAxis) in the frame of the nearest repeater axis. */
   const repeaterPointToAxisParams = (
     circularRepeaterId: CircularRepeaterId,
@@ -745,9 +848,90 @@ const App: Component = () => {
     if (chosen == null) {
       return { distanceAlongAxis: 0, distanceFromAxis: 0 };
     }
+    const perp =
+      Math.abs(chosen.perp) <= AXIS_MAGNETIC_THRESHOLD ? 0 : chosen.perp;
     return {
       distanceAlongAxis: chosen.d,
-      distanceFromAxis: chosen.perp,
+      distanceFromAxis: perp,
+    };
+  };
+
+  /** Given a repeater and a world point, return the snapped world position (x, y) for move preview. */
+  const repeaterPointToSnappedWorld = (
+    circularRepeaterId: CircularRepeaterId,
+    cx: number,
+    cy: number,
+    placesAbs: ReadonlyArray<{
+      id: PlaceId;
+      absX: number;
+      absY: number;
+      absWorldAngle: number;
+    }>,
+  ): { x: number; y: number } => {
+    const repAxes = axes().filter(
+      (a) =>
+        (a as { circularRepeaterId?: CircularRepeaterId })
+          .circularRepeaterId === circularRepeaterId,
+    );
+    let best: {
+      d: number;
+      perp: number;
+      absPerp: number;
+      geom: { originX: number; originY: number; worldAngle: number };
+    } | null = null;
+    let fallback: {
+      d: number;
+      perp: number;
+      absPerp: number;
+      geom: { originX: number; originY: number; worldAngle: number };
+    } | null = null;
+    for (const axis of repAxes) {
+      const geom = getAxisWorldGeometry(
+        { id: axis.id, placeId: axis.placeId, angle: Number(axis.angle) },
+        placesAbs,
+      );
+      let d = projectPointOntoAxis(
+        cx,
+        cy,
+        geom.originX,
+        geom.originY,
+        geom.worldAngle,
+      );
+      const cosA = Math.cos(geom.worldAngle);
+      const sinA = Math.sin(geom.worldAngle);
+      const projX = geom.originX + d * cosA;
+      const projY = geom.originY + d * sinA;
+      const perp = (cx - projX) * -sinA + (cy - projY) * cosA;
+      const absPerp = Math.abs(perp);
+      const entry = { d, perp, absPerp, geom };
+      if (axis.isBidirectional === 0) {
+        if (d >= 0) {
+          d = Math.max(0, d);
+          if (best == null || absPerp < best.absPerp) {
+            best = { d, perp, absPerp, geom };
+          }
+        } else if (fallback == null || absPerp < fallback.absPerp) {
+          fallback = { d: 0, perp, absPerp, geom };
+        }
+      } else {
+        if (best == null || absPerp < best.absPerp) {
+          best = entry;
+        }
+      }
+    }
+    const chosen = best ?? fallback;
+    if (chosen == null) {
+      return { x: cx, y: cy };
+    }
+    const perpSnapped =
+      Math.abs(chosen.perp) <= AXIS_MAGNETIC_THRESHOLD ? 0 : chosen.perp;
+    const cosA = Math.cos(chosen.geom.worldAngle);
+    const sinA = Math.sin(chosen.geom.worldAngle);
+    const projX = chosen.geom.originX + chosen.d * cosA;
+    const projY = chosen.geom.originY + chosen.d * sinA;
+    return {
+      x: projX + perpSnapped * -sinA,
+      y: projY + perpSnapped * cosA,
     };
   };
 
@@ -1123,10 +1307,23 @@ const App: Component = () => {
           (a as { circularRepeaterId?: CircularRepeaterId })
             .circularRepeaterId === paRep.circularRepeaterId,
       );
+      const count = repAxes.length;
+      const show = paRep.alternatingShow ?? 1;
+      const skip = paRep.alternatingSkip ?? 1;
+      const start = paRep.alternatingStart ?? 1;
       const perp = paRep.distanceFromAxis ?? 0;
+      let pendingEchoIndex = 0;
       for (let i = 0; i < repAxes.length; i++) {
         const axis = repAxes[i];
         if (!axis) continue;
+        const axisNum = circularRepeaterAxisNumber(
+          axis.id,
+          paRep.circularRepeaterId,
+          axes(),
+        );
+        if (!inAxisAlternatingPattern(axisNum, start, show, skip, count))
+          continue;
+        pendingEchoIndex += 1;
         const parentPlace = pl.find((p) => p.id === axis.placeId);
         if (parentPlace) {
           const parentAbs = getAbsolutePosition(
@@ -1142,7 +1339,7 @@ const App: Component = () => {
           const px = parentAbs.x + d * cosA + perp * -sinA;
           const py = parentAbs.y + d * sinA + perp * cosA;
           result.push({
-            id: `__pending_rep_${i}__` as PlaceId,
+            id: `__pending_rep_${pendingEchoIndex}__` as PlaceId,
             parentId: null,
             parentAxisId: null,
             x: 0,
@@ -1877,7 +2074,7 @@ const App: Component = () => {
         placesAbs,
       );
       setPendingAddPlaceOnCircularRepeater({
-        circularRepeaterId: paRep.circularRepeaterId,
+        ...paRep,
         distanceAlongAxis: params.distanceAlongAxis,
         distanceFromAxis: params.distanceFromAxis,
       });
@@ -2054,7 +2251,7 @@ const App: Component = () => {
                   place.absX - centerPlace.absX,
                 )
               : null;
-          const angleForHit = radialAngle ?? theta;
+          const angleForHit = theta;
           const useMathConvention = parentAxisId != null;
           if (
             isPointNearAxis(
@@ -2069,7 +2266,7 @@ const App: Component = () => {
           ) {
             setPendingRotate({
               placeId: selId,
-              angle: radialAngle ?? theta,
+              angle: theta,
             });
           }
         }
@@ -2253,7 +2450,7 @@ const App: Component = () => {
           placesAbs,
         );
         setPendingAddPlaceOnCircularRepeater({
-          circularRepeaterId: paRep.circularRepeaterId,
+          ...paRep,
           distanceAlongAxis: params.distanceAlongAxis,
           distanceFromAxis: params.distanceFromAxis,
         });
@@ -2346,26 +2543,18 @@ const App: Component = () => {
         if (place?.parentAxisId != null) {
           const axis = axes().find((a) => a.id === place.parentAxisId);
           if (axis) {
-            const parentPlace = places().find((p) => p.id === axis.placeId);
-            if (parentPlace) {
+            const repId = (axis as { circularRepeaterId?: CircularRepeaterId })
+              .circularRepeaterId;
+            if (repId != null) {
               const placesAbs = placesWithAbsolutePositions();
-              const geom = getAxisWorldGeometry(
-                {
-                  id: axis.id,
-                  placeId: axis.placeId,
-                  angle: Number(axis.angle),
-                },
-                placesAbs,
-              );
-              let d = projectPointOntoAxis(
+              const snapped = repeaterPointToSnappedWorld(
+                repId,
                 cx,
                 cy,
-                geom.originX,
-                geom.originY,
-                geom.worldAngle,
+                placesAbs,
               );
-              if (axis.isBidirectional === 0) d = Math.max(0, d);
-              // Use cursor position (cx, cy) so the move can be off-axis; placesWithAbsolutePositions and commit project it to (d, perp) per axis.
+              setPendingMove({ placeId: pm.placeId, x: snapped.x, y: snapped.y });
+            } else {
               setPendingMove({ placeId: pm.placeId, x: cx, y: cy });
             }
           }
@@ -2786,6 +2975,9 @@ const App: Component = () => {
         setPendingAddPlaceOnCircularRepeater({
           circularRepeaterId: repeaterId,
           distanceAlongAxis: 0,
+          alternatingShow: 1,
+          alternatingSkip: 1,
+          alternatingStart: 1,
         });
       }
     }
@@ -2803,9 +2995,17 @@ const App: Component = () => {
                 .circularRepeaterId
             : null;
           if (repId) {
+            const placeRow = place as {
+              alternatingShow?: number | null;
+              alternatingSkip?: number | null;
+              alternatingStart?: number | null;
+            };
             setPendingModifyPlaceOnCircularRepeater({
               placeId,
               circularRepeaterId: repId,
+              alternatingShow: placeRow.alternatingShow ?? 1,
+              alternatingSkip: placeRow.alternatingSkip ?? 1,
+              alternatingStart: placeRow.alternatingStart ?? 1,
             });
           }
         }
@@ -2912,6 +3112,126 @@ const App: Component = () => {
     const del = pendingDeletePlaceId();
     const placesList = places();
 
+    const paModRep = pendingModifyPlaceOnCircularRepeater();
+    if (paModRep) {
+      const repAxes = axes()
+        .filter(
+          (a) =>
+            (a as { circularRepeaterId?: CircularRepeaterId })
+              .circularRepeaterId === paModRep.circularRepeaterId,
+        )
+        .sort((a, b) => Number(a.angle) - Number(b.angle));
+      const count = repAxes.length;
+      const show = paModRep.alternatingShow ?? 1;
+      const skip = paModRep.alternatingSkip ?? 1;
+      const start = paModRep.alternatingStart ?? 1;
+      const inPatternAxisNumbers = new Set<number>();
+      for (let n = 1; n <= count; n++) {
+        if (inAxisAlternatingPattern(n, start, show, skip, count))
+          inPatternAxisNumbers.add(n);
+      }
+      const place = placesList.find((p) => p.id === paModRep.placeId) as
+        | PlaceLike
+        | undefined;
+      const groupId = place?.repeaterEchoGroupId;
+      if (groupId != null && repAxes.length > 0) {
+        const groupPlaces = placesList.filter(
+          (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
+        );
+        const repAxisIds = new Set(repAxes.map((a) => a.id));
+        const directEchoes = groupPlaces.filter(
+          (p) => (p as PlaceLike).parentAxisId != null && repAxisIds.has((p as PlaceLike).parentAxisId!),
+        );
+        const toDelete = new Set<PlaceId>();
+        for (const p of directEchoes) {
+          const axisId = (p as PlaceLike).parentAxisId!;
+          const axisNum = circularRepeaterAxisNumber(
+            axisId,
+            paModRep.circularRepeaterId,
+            axes(),
+          );
+          if (!inPatternAxisNumbers.has(axisNum)) {
+            toDelete.add(p.id);
+            const collectDescendants = (pid: PlaceId) => {
+              for (const c of placesList) {
+                if ((c as { parentId?: PlaceId }).parentId === pid) {
+                  toDelete.add(c.id);
+                  collectDescendants(c.id);
+                }
+              }
+            };
+            collectDescendants(p.id);
+          }
+        }
+        for (const id of toDelete) {
+          evolu.update('place', { id, isDeleted: true });
+        }
+        const remainingGroup = groupPlaces.filter((p) => !toDelete.has(p.id));
+        const referenceEcho = remainingGroup.find(
+          (p) => (p as PlaceLike).parentAxisId != null && repAxisIds.has((p as PlaceLike).parentAxisId!),
+        ) as (PlaceLike & { distanceAlongAxis?: number; distanceFromAxis?: number }) | undefined;
+        const distAlong = referenceEcho?.distanceAlongAxis ?? 0;
+        const distFrom = referenceEcho?.distanceFromAxis ?? 0;
+        const axesWithEcho = new Set(
+          remainingGroup
+            .filter((p) => (p as PlaceLike).parentAxisId != null && repAxisIds.has((p as PlaceLike).parentAxisId!))
+            .map((p) => (p as PlaceLike).parentAxisId!),
+        );
+        const baseName = (
+          (referenceEcho as { name?: string | null })?.name?.trim() ?? 'Place'
+        ).replace(/ Echo \d+$/, '');
+        let echoIndex = remainingGroup.filter(
+          (p) => (p as PlaceLike).parentAxisId != null && repAxisIds.has((p as PlaceLike).parentAxisId!),
+        ).length;
+        for (const axis of repAxes) {
+          const axisNum = circularRepeaterAxisNumber(
+            axis.id,
+            paModRep.circularRepeaterId,
+            axes(),
+          );
+          if (!inPatternAxisNumbers.has(axisNum) || axesWithEcho.has(axis.id))
+            continue;
+          echoIndex += 1;
+          const echoName = `${baseName} Echo ${echoIndex}`;
+          const nameResult = String1000.from(echoName);
+          evolu.insert('place', {
+            parentId: null,
+            parentAxisId: axis.id,
+            distanceAlongAxis: distAlong,
+            distanceFromAxis: distFrom,
+            x: 0,
+            y: 0,
+            repeaterEchoGroupId: groupId,
+            ...(nameResult.ok && { name: nameResult.value }),
+            isScaffolding: 1,
+            alternatingShow: show,
+            alternatingSkip: skip,
+            alternatingStart: start,
+          });
+          axesWithEcho.add(axis.id);
+        }
+        for (const p of remainingGroup) {
+          evolu.update('place', {
+            id: p.id,
+            alternatingShow: show,
+            alternatingSkip: skip,
+            alternatingStart: start,
+          });
+        }
+        recordTransformation({
+          kind: 'modifyPlaceOnCircularRepeater',
+          placeId: paModRep.placeId,
+          circularRepeaterId: paModRep.circularRepeaterId,
+          distanceAlongAxis: distAlong,
+          distanceFromAxis: distFrom,
+          alternatingShow: show,
+          alternatingSkip: skip,
+          alternatingStart: start,
+        });
+      }
+      setPendingModifyPlaceOnCircularRepeater(null);
+    }
+
     let insertedPlaceId: PlaceId | null = null;
     if (add) {
       let x = add.x;
@@ -2937,12 +3257,23 @@ const App: Component = () => {
             const echoPlaces = placesList.filter(
               (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
             );
+            const axesList = axes();
+            const sortedEchoes = [...echoPlaces].sort((a, b) => {
+              const axisIdA = getAxisIdForEcho(a as PlaceLike, placesList);
+              const axisIdB = getAxisIdForEcho(b as PlaceLike, placesList);
+              const axA = axesList.find((ax) => ax.id === axisIdA);
+              const axB = axesList.find((ax) => ax.id === axisIdB);
+              return (
+                Number(axA?.angle ?? 0) - Number(axB?.angle ?? 0)
+              );
+            });
             let firstPlaceId: PlaceId | null = null;
-            let namesList: ReadonlyArray<{ name: string | null }> =
+            const namesList: ReadonlyArray<{ name: string | null }> =
               placesList.map((p) => ({ name: p.name ?? null }));
-            for (const echo of echoPlaces) {
-              const defaultName = nextPlaceName(namesList);
-              const nameResult = String1000.from(defaultName);
+            const baseName = nextPlaceName(namesList);
+            sortedEchoes.forEach((echo, i) => {
+              const echoName = `${baseName} Echo ${i + 1}`;
+              const nameResult = String1000.from(echoName);
               const r = evolu.insert('place', {
                 parentId: echo.id,
                 x,
@@ -2955,10 +3286,6 @@ const App: Component = () => {
               });
               if (r.ok) {
                 if (firstPlaceId == null) firstPlaceId = r.value.id;
-                namesList = [
-                  ...namesList,
-                  { name: nameResult.ok ? defaultName : null },
-                ];
                 recordTransformation({
                   kind: 'addRelated',
                   placeId: r.value.id,
@@ -2967,7 +3294,7 @@ const App: Component = () => {
                   y,
                 });
               }
-            }
+            });
             if (firstPlaceId != null) {
               evolu.update('place', {
                 id: firstPlaceId,
@@ -3024,23 +3351,45 @@ const App: Component = () => {
         if (placeOnAxis) {
           const axis = axes().find((a) => a.id === placeOnAxis);
           if (axis) {
-            const parentPlace = placesList.find((p) => p.id === axis.placeId);
-            if (parentPlace) {
-              const parentRes = getAbsolutePosition(parentPlace, placesList);
-              const worldAngle = parentRes.worldAngle + Number(axis.angle);
-              let d = projectPointOntoAxis(
+            const placesAbs = placesWithAbsolutePositions();
+            const repId = (axis as { circularRepeaterId?: CircularRepeaterId })
+              .circularRepeaterId;
+            let d: number;
+            let perp: number;
+            if (repId != null) {
+              const params = repeaterPointToAxisParams(
+                repId,
                 move.x,
                 move.y,
-                parentRes.x,
-                parentRes.y,
-                worldAngle,
+                placesAbs,
+              );
+              d = params.distanceAlongAxis;
+              perp = params.distanceFromAxis;
+            } else {
+              const geom = getAxisWorldGeometry(
+                {
+                  id: axis.id,
+                  placeId: axis.placeId,
+                  angle: Number(axis.angle),
+                },
+                placesAbs,
+              );
+              d = projectPointOntoAxis(
+                move.x,
+                move.y,
+                geom.originX,
+                geom.originY,
+                geom.worldAngle,
               );
               if (axis.isBidirectional === 0) d = Math.max(0, d);
-              const cosA = Math.cos(worldAngle);
-              const sinA = Math.sin(worldAngle);
-              const perp =
-                (move.x - (parentRes.x + d * cosA)) * -sinA +
-                (move.y - (parentRes.y + d * sinA)) * cosA;
+              const cosA = Math.cos(geom.worldAngle);
+              const sinA = Math.sin(geom.worldAngle);
+              const projX = geom.originX + d * cosA;
+              const projY = geom.originY + d * sinA;
+              perp =
+                (move.x - projX) * -sinA + (move.y - projY) * cosA;
+              if (Math.abs(perp) <= AXIS_MAGNETIC_THRESHOLD) perp = 0;
+            }
               const groupId = (place as PlaceLike).repeaterEchoGroupId;
               const toUpdate =
                 groupId != null
@@ -3049,22 +3398,35 @@ const App: Component = () => {
                     )
                   : [place];
               const paModRep = pendingModifyPlaceOnCircularRepeater();
+              const placeRow = place as {
+                alternatingShow?: number | null;
+                alternatingSkip?: number | null;
+                alternatingStart?: number | null;
+              };
               for (const p of toUpdate) {
                 if (p && (p as PlaceLike).parentAxisId != null) {
                   evolu.update('place', {
                     id: p.id,
                     distanceAlongAxis: d,
                     distanceFromAxis: perp,
+                    ...(paModRep && {
+                      alternatingShow: paModRep.alternatingShow ?? 1,
+                      alternatingSkip: paModRep.alternatingSkip ?? 1,
+                      alternatingStart: paModRep.alternatingStart ?? 1,
+                    }),
                   });
                 }
               }
-              if (paModRep && paModRep.placeId === placeId) {
+              if (repId != null && groupId != null) {
                 recordTransformation({
                   kind: 'modifyPlaceOnCircularRepeater',
                   placeId,
-                  circularRepeaterId: paModRep.circularRepeaterId,
+                  circularRepeaterId: repId,
                   distanceAlongAxis: d,
                   distanceFromAxis: perp,
+                  alternatingShow: paModRep?.alternatingShow ?? placeRow.alternatingShow ?? 1,
+                  alternatingSkip: paModRep?.alternatingSkip ?? placeRow.alternatingSkip ?? 1,
+                  alternatingStart: paModRep?.alternatingStart ?? placeRow.alternatingStart ?? 1,
                 });
                 setPendingModifyPlaceOnCircularRepeater(null);
               } else {
@@ -3076,7 +3438,6 @@ const App: Component = () => {
                   y: move.y,
                 });
               }
-            }
           }
         } else {
           const placeOnCf =
@@ -3130,11 +3491,22 @@ const App: Component = () => {
                 y = local.y;
               }
             }
-            evolu.update('place', {
-              id: placeId,
-              x,
-              y,
-            });
+            const groupId = (place as PlaceLike).repeaterEchoGroupId;
+            const toUpdate =
+              groupId != null
+                ? placesList.filter(
+                    (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
+                  )
+                : [place];
+            for (const p of toUpdate) {
+              if (p) {
+                evolu.update('place', {
+                  id: p.id,
+                  x,
+                  y,
+                });
+              }
+            }
             recordTransformation({
               kind: 'move',
               placeId,
@@ -3378,8 +3750,15 @@ const App: Component = () => {
       });
       if (repRes.ok) {
         const repId = repRes.value.id;
+        const repeaterName = nextRepeaterName(circularRepeaters());
+        const nameResult = String1000.from(repeaterName);
+        if (nameResult.ok)
+          evolu.update('circularRepeater', {
+            id: repId,
+            name: nameResult.value,
+          });
         for (let k = 0; k < count; k++) {
-          const angle = (2 * Math.PI * k) / count;
+          const angle = -Math.PI / 2 + (2 * Math.PI * k) / count;
           evolu.insert('axis', {
             placeId: addRep.placeId,
             angle,
@@ -3410,9 +3789,9 @@ const App: Component = () => {
             (a as { circularRepeaterId?: CircularRepeaterId })
               .circularRepeaterId === modRep.circularRepeaterId,
         );
+        let finalAxisIds: AxisId[] = repAxes.map((a) => a.id);
         if (newCount > oldCount) {
           // Map existing axes to the nearest slots in the newCount grid, then add axes for unassigned slots.
-          // Sort by angle so k-th axis maps to slot round(k*newCount/oldCount) % newCount.
           const sorted = [...repAxes].sort(
             (a, b) => Number(a.angle) - Number(b.angle),
           );
@@ -3421,41 +3800,202 @@ const App: Component = () => {
             const j = Math.round((k * newCount) / oldCount) % newCount;
             const slot = (j + newCount) % newCount;
             assigned.add(slot);
-            const angle = (2 * Math.PI * slot) / newCount;
+            const angle = -Math.PI / 2 + (2 * Math.PI * slot) / newCount;
             const ax = sorted[k];
             if (ax) evolu.update('axis', { id: ax.id, angle });
           }
+          const newAxisIds: AxisId[] = [];
           for (let j = 0; j < newCount; j++) {
             if (assigned.has(j)) continue;
-            const angle = (2 * Math.PI * j) / newCount;
-            evolu.insert('axis', {
+            const angle = -Math.PI / 2 + (2 * Math.PI * j) / newCount;
+            const axisRes = evolu.insert('axis', {
               placeId: repeater.placeId,
               angle,
               isBidirectional: 0,
               circularRepeaterId: modRep.circularRepeaterId,
-            });
+            }) as { ok: true; value: { id: AxisId } } | { ok: false };
+            if (axisRes.ok) newAxisIds.push(axisRes.value.id);
           }
+          const originalAxisIds = new Set(repAxes.map((a) => a.id));
+          const firstPlaces = placesList.filter(
+            (p) =>
+              (p as PlaceLike).repeaterEchoGroupId === p.id &&
+              (p as PlaceLike).parentAxisId != null &&
+              originalAxisIds.has((p as PlaceLike).parentAxisId!),
+          );
+          for (const template of firstPlaces) {
+            const groupId = template.id;
+            const d = (template as PlaceLike).distanceAlongAxis ?? 0;
+            const perp = (template as PlaceLike).distanceFromAxis ?? 0;
+            const angle = (template as PlaceLike).angle ?? 0;
+            const templateWithName = template as PlaceLike & {
+              name?: string | null;
+              isScaffolding?: number | null;
+            };
+            const baseName =
+              (templateWithName.name?.trim().match(/^(.+?) Echo \d+$/) ?? null)?.[1] ??
+              templateWithName.name?.trim() ??
+              'Place';
+            const groupEchoes = placesList.filter(
+              (p) => (p as PlaceLike).repeaterEchoGroupId === groupId,
+            );
+            let maxEchoIndex = 0;
+            for (const ep of groupEchoes) {
+              const name = (ep as PlaceLike & { name?: string | null }).name;
+              const m = name?.trim().match(/ Echo (\d+)$/);
+              if (m?.[1])
+                maxEchoIndex = Math.max(
+                  maxEchoIndex,
+                  Number.parseInt(m[1], 10),
+                );
+            }
+            for (let idx = 0; idx < newAxisIds.length; idx++) {
+              const echoName = `${baseName} Echo ${maxEchoIndex + idx + 1}`;
+              const nameResult = String1000.from(echoName);
+              const echoRes = evolu.insert('place', {
+                parentId: null,
+                parentAxisId: newAxisIds[idx]!,
+                distanceAlongAxis: d,
+                distanceFromAxis: perp,
+                x: 0,
+                y: 0,
+                angle,
+                repeaterEchoGroupId: groupId,
+                ...(nameResult.ok && { name: nameResult.value }),
+                isScaffolding: templateWithName.isScaffolding ?? 1,
+              }) as { ok: true; value: { id: PlaceId } } | { ok: false };
+              if (!echoRes.ok) continue;
+              const newEchoId = echoRes.value.id;
+              const oldToNew = new Map<PlaceId, PlaceId>([
+                [template.id, newEchoId],
+              ]);
+              const newEchoIndex = maxEchoIndex + idx + 1;
+              const descIds = getDescendantPlaceIds(template.id, placesList);
+              for (const oldId of descIds) {
+                const q = placesList.find((pl) => pl.id === oldId) as
+                  | PlaceLike
+                  | undefined;
+                if (!q || q.parentId == null) continue;
+                const parentNewId = oldToNew.get(q.parentId);
+                if (parentNewId == null) continue;
+                const descBaseName =
+                  (q.name?.trim().match(/^(.+?) Echo \d+$/) ?? null)?.[1] ??
+                  q.name?.trim() ??
+                  'Place';
+                const descEchoName = `${descBaseName} Echo ${newEchoIndex}`;
+                const nameQ = String1000.from(descEchoName);
+                const r = evolu.insert('place', {
+                  parentId: parentNewId,
+                  x: q.x ?? 0,
+                  y: q.y ?? 0,
+                  angle: q.angle ?? null,
+                  repeaterEchoGroupId: groupId,
+                  ...(nameQ.ok && { name: nameQ.value }),
+                  isScaffolding: q.isScaffolding ?? 1,
+                }) as { ok: true; value: { id: PlaceId } } | { ok: false };
+                if (r.ok) oldToNew.set(oldId, r.value.id);
+              }
+            }
+          }
+          finalAxisIds = [...repAxes.map((a) => a.id), ...newAxisIds];
         } else if (newCount < oldCount) {
           const sorted = [...repAxes].sort(
             (a, b) => Number(a.angle) - Number(b.angle),
           );
           const toRemove = sorted.slice(newCount);
+          const toKeep = sorted.slice(0, newCount);
+          const removedAxisIds = new Set(toRemove.map((ax) => ax.id));
           const placesOnRemoved = placesList.filter(
             (p) =>
               (p as PlaceLike).parentAxisId != null &&
-              toRemove.some((ax) => ax.id === (p as PlaceLike).parentAxisId),
+              removedAxisIds.has((p as PlaceLike).parentAxisId!),
           );
-          if (placesOnRemoved.length === 0) {
-            for (const ax of toRemove) {
-              evolu.update('axis', { id: ax.id, isDeleted: true });
+          const idsToDelete = new Set<PlaceId>();
+          for (const p of placesOnRemoved) {
+            idsToDelete.add(p.id);
+            for (const descId of getDescendantPlaceIds(p.id, placesList)) {
+              idsToDelete.add(descId);
             }
-            // Update kept axes to evenly spaced angles 2π*k/newCount
-            const toKeep = sorted.slice(0, newCount);
-            for (let k = 0; k < toKeep.length; k++) {
-              const angle = (2 * Math.PI * k) / newCount;
-              const ax = toKeep[k];
-              if (ax) evolu.update('axis', { id: ax.id, angle });
-            }
+          }
+          for (const id of idsToDelete) {
+            evolu.update('place', { id, isDeleted: true });
+          }
+          for (const ax of toRemove) {
+            evolu.update('axis', { id: ax.id, isDeleted: true });
+          }
+          for (let k = 0; k < toKeep.length; k++) {
+            const angle = -Math.PI / 2 + (2 * Math.PI * k) / newCount;
+            const ax = toKeep[k];
+            if (ax) evolu.update('axis', { id: ax.id, angle });
+          }
+          finalAxisIds = toKeep.map((a) => a.id);
+          const keepAxisIds = new Set(finalAxisIds);
+          const remainingEchoPlaces = placesList.filter(
+            (p) =>
+              (p as PlaceLike).parentAxisId != null &&
+              keepAxisIds.has((p as PlaceLike).parentAxisId!),
+          );
+          const axisOrder = new Map(toKeep.map((ax, i) => [ax.id, i]));
+          const byGroup = new Map<PlaceId, typeof remainingEchoPlaces>();
+          for (const p of remainingEchoPlaces) {
+            const gid = (p as PlaceLike).repeaterEchoGroupId;
+            if (gid == null) continue;
+            if (!byGroup.has(gid)) byGroup.set(gid, []);
+            byGroup.get(gid)!.push(p);
+          }
+          const remainingEchoPlaceIds = new Set(
+            remainingEchoPlaces.map((p) => p.id),
+          );
+          for (const [, groupPlaces] of byGroup) {
+            const sorted = [...groupPlaces].sort(
+              (a, b) =>
+                (axisOrder.get((a as PlaceLike).parentAxisId!) ?? 0) -
+                (axisOrder.get((b as PlaceLike).parentAxisId!) ?? 0),
+            );
+            const baseName =
+              (sorted[0]?.name?.trim().match(/^(.+?) Echo \d+$/) ?? null)?.[1] ??
+              sorted[0]?.name?.trim() ??
+              'Place';
+            sorted.forEach((p, i) => {
+              const echoName = `${baseName} Echo ${i + 1}`;
+              const nameResult = String1000.from(echoName);
+              if (nameResult.ok)
+                evolu.update('place', { id: p.id, name: nameResult.value });
+            });
+          }
+          for (const p of placesList) {
+            if (remainingEchoPlaceIds.has(p.id)) continue;
+            const axisId = getAxisIdForEcho(p as PlaceLike, placesList);
+            if (axisId == null || !keepAxisIds.has(axisId)) continue;
+            const axisIndex = axisOrder.get(axisId) ?? 0;
+            const descBaseName =
+              (p.name?.trim().match(/^(.+?) Echo \d+$/) ?? null)?.[1] ??
+              p.name?.trim() ??
+              'Place';
+            const echoName = `${descBaseName} Echo ${axisIndex + 1}`;
+            const nameResult = String1000.from(echoName);
+            if (nameResult.ok)
+              evolu.update('place', { id: p.id, name: nameResult.value });
+          }
+        }
+        if (newCount !== oldCount) {
+          const scale = oldCount / newCount;
+          const finalAxisIdSet = new Set(finalAxisIds);
+          for (const p of placesList) {
+            const axisId = (p as PlaceLike).parentAxisId;
+            if (axisId == null || !finalAxisIdSet.has(axisId)) continue;
+            const d = (p as PlaceLike).distanceAlongAxis ?? 0;
+            const perp = (p as PlaceLike).distanceFromAxis ?? 0;
+            const r = Math.sqrt(d * d + perp * perp);
+            const angleFromAxis = Math.atan2(perp, d);
+            const newAngleFromAxis = angleFromAxis * scale;
+            const newD = r * Math.cos(newAngleFromAxis);
+            const newPerp = r * Math.sin(newAngleFromAxis);
+            evolu.update('place', {
+              id: p.id,
+              distanceAlongAxis: newD,
+              distanceFromAxis: newPerp,
+            });
           }
         }
         evolu.update('circularRepeater', {
@@ -3496,17 +4036,33 @@ const App: Component = () => {
 
     const addPlaceOnRep = pendingAddPlaceOnCircularRepeater();
     if (addPlaceOnRep) {
-      const repAxes = axes().filter(
-        (a) =>
-          (a as { circularRepeaterId?: CircularRepeaterId })
-            .circularRepeaterId === addPlaceOnRep.circularRepeaterId,
-      );
+      const repAxes = axes()
+        .filter(
+          (a) =>
+            (a as { circularRepeaterId?: CircularRepeaterId })
+              .circularRepeaterId === addPlaceOnRep.circularRepeaterId,
+        )
+        .sort((a, b) => Number(a.angle) - Number(b.angle));
+      const count = repAxes.length;
+      const show = addPlaceOnRep.alternatingShow ?? 1;
+      const skip = addPlaceOnRep.alternatingSkip ?? 1;
+      const start = addPlaceOnRep.alternatingStart ?? 1;
+      const repAxesInPattern = repAxes.filter((axis) => {
+        const axisNum = circularRepeaterAxisNumber(
+          axis.id,
+          addPlaceOnRep.circularRepeaterId,
+          axes(),
+        );
+        return inAxisAlternatingPattern(axisNum, start, show, skip, count);
+      });
       const distanceFromAxis = addPlaceOnRep.distanceFromAxis ?? 0;
-      let namesList: ReadonlyArray<{ name: string | null }> = placesList;
+      const baseName = nextPlaceName(placesList);
       let firstPlaceId: PlaceId | null = null;
-      for (const axis of repAxes) {
-        const defaultName = nextPlaceName(namesList);
-        const nameResult = String1000.from(defaultName);
+      let echoIndex = 0;
+      for (const axis of repAxesInPattern) {
+        echoIndex += 1;
+        const echoName = `${baseName} Echo ${echoIndex}`;
+        const nameResult = String1000.from(echoName);
         const placeRes: { ok: true; value: { id: PlaceId } } | { ok: false } =
           evolu.insert('place', {
             parentId: null,
@@ -3518,25 +4074,29 @@ const App: Component = () => {
             ...(firstPlaceId != null && { repeaterEchoGroupId: firstPlaceId }),
             ...(nameResult.ok && { name: nameResult.value }),
             isScaffolding: 1,
+            alternatingShow: show,
+            alternatingSkip: skip,
+            alternatingStart: start,
           });
-        if (placeRes.ok) {
-          if (firstPlaceId == null) firstPlaceId = placeRes.value.id;
-          namesList = [
-            ...namesList,
-            { name: nameResult.ok ? defaultName : null },
-          ];
-        }
+        if (placeRes.ok && firstPlaceId == null)
+          firstPlaceId = placeRes.value.id;
       }
       if (firstPlaceId != null) {
         evolu.update('place', {
           id: firstPlaceId,
           repeaterEchoGroupId: firstPlaceId,
+          alternatingShow: show,
+          alternatingSkip: skip,
+          alternatingStart: start,
         });
         recordTransformation({
           kind: 'addPlaceOnCircularRepeater',
           circularRepeaterId: addPlaceOnRep.circularRepeaterId,
           placeId: firstPlaceId,
           distanceAlongAxis: addPlaceOnRep.distanceAlongAxis,
+          alternatingShow: show,
+          alternatingSkip: skip,
+          alternatingStart: start,
         });
       }
       setPendingAddPlaceOnCircularRepeater(null);
@@ -4211,6 +4771,58 @@ const App: Component = () => {
             const pmod = pendingModifyCircularRepeater();
             if (pmod) setPendingModifyCircularRepeater({ ...pmod, count: n });
           }}
+          alternatingPattern={
+            (transformChoice() === 'addPlaceOnCircularRepeater' &&
+              pendingAddPlaceOnCircularRepeater()) ||
+            (transformChoice() === 'modifyPlaceOnCircularRepeater' &&
+              pendingModifyPlaceOnCircularRepeater())
+              ? {
+                  show:
+                    pendingAddPlaceOnCircularRepeater()?.alternatingShow ??
+                    pendingModifyPlaceOnCircularRepeater()?.alternatingShow ??
+                    1,
+                  skip:
+                    pendingAddPlaceOnCircularRepeater()?.alternatingSkip ??
+                    pendingModifyPlaceOnCircularRepeater()?.alternatingSkip ??
+                    1,
+                  start:
+                    pendingAddPlaceOnCircularRepeater()?.alternatingStart ??
+                    pendingModifyPlaceOnCircularRepeater()?.alternatingStart ??
+                    1,
+                }
+              : null
+          }
+          onAlternatingPatternChange={(show, skip, start) => {
+            const pa = pendingAddPlaceOnCircularRepeater();
+            if (pa)
+              setPendingAddPlaceOnCircularRepeater({
+                ...pa,
+                alternatingShow: show,
+                alternatingSkip: skip,
+                alternatingStart: start,
+              });
+            const pmod = pendingModifyPlaceOnCircularRepeater();
+            if (pmod)
+              setPendingModifyPlaceOnCircularRepeater({
+                ...pmod,
+                alternatingShow: show,
+                alternatingSkip: skip,
+                alternatingStart: start,
+              });
+          }}
+          circularRepeaterAxisCount={
+            (() => {
+              const repId =
+                pendingAddPlaceOnCircularRepeater()?.circularRepeaterId ??
+                pendingModifyPlaceOnCircularRepeater()?.circularRepeaterId;
+              if (!repId) return 1;
+              return axes().filter(
+                (a) =>
+                  (a as { circularRepeaterId?: CircularRepeaterId })
+                    .circularRepeaterId === repId,
+              ).length;
+            })()
+          }
           bendAtEndsState={bendAtEndsState()}
           axisDirection={
             (transformChoice() === 'addAxis' ||
@@ -4307,7 +4919,7 @@ const App: Component = () => {
                       const theta =
                         isSelected
                           ? pendingRotate()?.angle ??
-                            (radialAngle ?? place.absWorldAngle ?? 0)
+                            (place.absWorldAngle ?? radialAngle ?? 0)
                           : place.absWorldAngle ?? 0;
                       const dirX = isAxisPlace
                         ? Math.cos(theta)
@@ -4546,6 +5158,43 @@ const App: Component = () => {
                         fill={svgTokens.handleFill}
                         style={svgTokens.pointerEventsNone}
                       />
+                    )}
+                    {isRepeaterSelected &&
+                      axisLike.circularRepeaterId != null &&
+                      axisLike.id !== 'pending-axis' && (
+                      (() => {
+                        const axisNumber = circularRepeaterAxisNumber(
+                          axisLike.id as AxisId,
+                          axisLike.circularRepeaterId,
+                          axes(),
+                        );
+                        if (axisNumber <= 0) return null;
+                        const labelOffset = svgTokens.axisLabelOffset;
+                        const distFromAxis = svgTokens.axisLabelDistanceFromAxis;
+                        const cosA = Math.cos(geom.worldAngle);
+                        const sinA = Math.sin(geom.worldAngle);
+                        const labelX =
+                          geom.originX +
+                          labelOffset * cosA -
+                          distFromAxis * sinA;
+                        const labelY =
+                          geom.originY +
+                          labelOffset * sinA +
+                          distFromAxis * cosA;
+                        return (
+                          <text
+                            x={labelX}
+                            y={labelY}
+                            text-anchor="middle"
+                            dominant-baseline="middle"
+                            font-size={svgTokens.axisLabelFontSize}
+                            fill={svgTokens.orientationAxisStroke}
+                            style={svgTokens.pointerEventsNone}
+                          >
+                            {axisNumber}
+                          </text>
+                        );
+                      })()
                     )}
                   </g>
                 );
