@@ -1,5 +1,17 @@
 # Glossary
 
+## Background
+
+Core assumptions about the application:
+1. It is a drawing tool.
+2. It is intended for people who are not artists (who perhaps even think of themselves as people who cannot draw), are not familiar drawing software tools but would draw if they felt it was accessible to them.
+3. It is built around Christopher Alexander’s ideas around unfolding wholeness. In this approach a drawing grows from a basic seed (like a single dot on a piece of paper). The drawing “grows” through a sequence of transformations.
+4. Each transformation is a small (even minimal) change that enhances what already exists in the drawing. Good transformations build upon what already exists in the drawing and, when done well, feels like a natural evolution.
+5. The sequence of transformation also implies that the drawing has a timeline. It should be possible, for example, to present not just the resulting static image but an animation that shows how it grew and evolved from a seed.
+6. The drawing experience should feel playful and easy to use, almost like a game. In fact, after we establish the foundations of drawing in this tool we will explore the possibility of transforming it into a collaborative multi-player game in which  participants take turns making transformations to the drawing.
+7. One of the things that make the drawing experience accessible is an always-present guide that explicitly presents users with the relevant possibilities available to them an any given time. This is different from most existing software tools which typically provide a user with a lot of tools and a lot of options. This can be intimidating and confusions for non-professional users who have to learn the tool and the mental models that were build into it.
+8. The drawing process was conceived for (but may nto be limited to) creating mandala-like drawings. Mandalas usually have one very obvious center around which shapes are added using symmetries and repetitions. The drawing created by this application are not limited to just one center, but they will also be built using symmetries and repetition.
+
 ## Living Systems Development Terminology
 
 This glossary defines key terms used in the AGENTS.md protocol and Living Systems Commit Convention. Terms are ordered so that foundational concepts appear before terms that depend on them.
@@ -357,7 +369,7 @@ Organization that blocks adaptation, serves no current function, or exists only 
 
 **Contact tests:**
 - No usage in interaction logs
-- Documented user confusion or abandonment  
+- Documented user confusion or abandonment
 - Blocks planned evolution paths
 - Removal requires no compensating changes elsewhere
 
@@ -670,7 +682,155 @@ Every non-trivial claim should have at least one contact test.
 
 ---
 
-**Glossary version:** 1.0  
-**Last updated:** 2026-01-31  
-**Maintained by:** Living Systems Development Protocol  
+**Glossary version:** 1.0
+**Last updated:** 2026-01-31
+**Maintained by:** Living Systems Development Protocol
 **License:** CC0
+
+## Application Specific Terms
+
+### Canvas
+The canvas is an infinite vector graphics drawing area.
+
+### Drawing Pane
+Within the Canvas there is a finite drawing pane. This is the space in which the drawing happens. The drawing pane has a shape (and a size) both of which can be modified.
+
+### True North
+The Drawing Pane  has a north-like orientation (vertically up when looking at the drawing pane right side up).
+
+### Drawing Object
+A drawing is made up a of drawing objects and the relationships between them.
+
+### Parent Drawing Object
+A drawing object is always related to a parent drawing object.
+The Drawing Pane itself is the “root” Drawing Object.
+The first drawing object created by a user will therefore be related to the Drawing Pane or to another drawing object.
+The Drawing Pane is therefore a kind of “root drawing object” that contains everything else.
+
+### Guide Drawing Object
+Some drawing objects are created as guides around which other drawing objects are created and arranged.
+Guide drawing objects need to be visible while drawing but are not visible in the resulting drawing.
+Guide drawing objects need to visually distinct from other drawing objects.
+
+### Orientation Axis
+Every drawing object has an orientation axis.
+
+### Orientation
+The orientation of a Drawing Object is determined by the angle between its Orientation Axis and the Orientation Axis of its Parent Drawing Object.
+
+### Place
+A place is a fundamental Drawing Object  which signifies a location within the Drawing Pane. A place functions as a reference point to which other drawing objects can be anchored. A place is a Guide Drawing Object and should be appear as such.
+
+### Line Segment
+A line segment is a Drawing Object that has two ends.
+
+### Line Segment End
+A line Segment end is a drawing object that is always related both to both a Line Segment and to a Place.
+It can never exist on its own.
+The position of the line segment end in the drawing is taken from the place to which it is related.
+However the line segment end and the place itself are distinct drawing objects.
+There are different operations that can be done to a line segment end and to a place, therefore it is important to distinguish between them.
+
+### Scaffolding
+Scaffolding drawing objects are drawing objects that serve as reference for other drawing objects.
+They are visible while making the drawing but not visible in the drawing itself.
+All drawing objects can serve as scaffolding, however some drawing objects are scaffolding only.
+For example a place is just scaffolding. A line can be either scaffolding or visible.
+They can be used for placing other drawing objects (Which can also be both skeleton or visible drawing objects)
+They can be used for setting relative places, eg: places that occur where two lines cross.
+They can be used for setting relative dimensions.
+
+### Circular Field
+A circular field is a scaffolding drawing object.
+The circle is always related to a place.
+The center of the circle is at the position of its parent place.
+A radius defines the size of the field and generated a circular scaffolding (the circumference).
+
+### Axis
+An axis is a scaffolding drawing object.
+It is child of a place drawing object (a single place can have numerous axis children drawing objects).
+It appears as a straight dashed line that extends to the edges of the canvas.
+It has an orientation axis that is relative to the orientation of its parent place (when the parent place orientation changes so does the orientation of the axis).
+An axis can be unidirectional or bidirectional.
+
+### Unidirectional Axis
+A Unidirectional axis extends from a place in one direction only.
+
+### Bidirectional Axis
+A bidirectional axis extends from a place in both directions.
+
+### Handle
+Handles are visual queues to assist the user in understanding where in the drawing they can interact in order to make a desired change.
+They should appear when a drawing object and a transformation have been selected and should let the user know “where to grip” the selected drawing objects in order to make the desired transformation.
+Handles should be clearly distinct in order to attract the attention of the user (default: a small full green square).
+Handles should disappear when a transformation is completed (kept or discarded).
+
+### Repeater
+Repeaters are a family of scaffolding objects that repeat descendant drawing objects.
+Each repeater drawing object provides a different way of generating repetition.
+When a drawing object is added to a repeater, it and the additional (repeated) drawing objects that are created are called echoes.
+
+### Echo Drawing Object
+An echo drawing object is a drawing object generated by a repeater.
+All the echo drawing objects are related to each other.
+Any echo drawing object can be selected and transformed (like any other drawing object).
+When an echo drawing object is modified, all its echoes are modified in the same way.
+
+### Echo Group
+A set of related drawing object echoes within a repeater.
+
+### Circular Repeater
+A circular repeater is a scaffolding drawing object generates a number of unidirectional axes that emanate from its center.
+Places added to the repeater in relation to any of its axis are repeated on its axes.
+
+### Alternating Repetition
+In a repeater an alternating repetition pattern can be applied to a drawing object.
+Different drawing objects within the same repeater can have different repetition patterns.
+An alternating pattern is dictates on which nodes a drawing object should exist and on which nodes it should not exist.
+The alternating pattern is expressed as: number of continuous nodes to show and number of continuous nodes to skip.
+Example 1 - a basic alternating pattern is: show 1, hide 1; eg: in a 16 node circular repeater this would cause a drawing object to appear on every other nodes - 8 in total.
+Example 2 - a pattern of show2, hide2; eg: in a 16 node circular repeater this would cause a drawing object to appear on 4 pairs (also a total of 8 instances) of axes with 4 pairs of axes with no drawing object.
+Example 3 - a pattern of show3, hide1; eg: in a 16 node circular repeater this would cause a drawing object to appear 4 times on 3 continuous axes with one empty axis between each set of 3.
+When a alternating repetition pattern is created a user can decide on which axis in the repeater it should begin.
+This would make it possible, for example, to create different repetitions on odd and even axes.
+
+## Orhpaned Echo
+An echo drawing object can be removed from its repeater and continue to exist as an independent drawing object, when this happens it becomes an orphan.
+An orphaned echo drawing object does not change when any of its formerly related drawing objects are csuggesthanged.
+
+### Circular Repeater
+A cicrular repeater generates
+
+## Drawing Guide
+In most drawing tools a user faces many tools and choices that can be overwhelming and complicated to use (unless you are a trained professional).
+In this application there they are constantly guided.
+The drawing guide always makes clear to a user where they are and what they can do next (which depends on where they are).
+As a result, the user experience is simplified because at any given time the user only has access to relevant tools.
+The drawing guide ias based on a core drawing process that repeats itself.
+
+### Fundamental Drawing Process
+
+The drawing is created by repeatedly following the fundamental drawing process.
+The drawing guide should constantly reflect to the user where they are in the fundamental drawing process.
+
+#### Observe
+Look at the drawing, notice where you attention goes, until you get a sense of what you want to do next.
+
+#### Select
+Select the drawing object you wish to act on.
+If the drawing is new, the only drawing object that is available is the canvas itself.
+In complex drawings that have a deep hierarchy of related drawing objects, the selection process may take numerous selection operations, for example:
+- You select a drawing object, but in a complex drawing it may not be the drawing object you intended to select.
+- so you then select another drawing object that is likely related to the first object you select. This can be a drawing object to which it is related (traveling up the drawing object hierarch) or a drawing object that is related to it (traveling further down the drawing object hierarch).
+
+#### Transform
+There are basic transformations:
+1. Delete: remove the selected drawing object from the drawing.
+2. Move: Change the position of the selected drawing object.
+3. Add: add another drawing object related to the selected drawing object.
+4. Change: modify a special property of the selected drawing object.
+
+#### Complete Transformation
+There are two ways to complete a transformation:
+1. Commit: indicate that the transformation is complete and should become a part of the drawing.
+2. Reject: indicate htat the transformation is not desirable and should be discarded and not become a part of the drawing.
