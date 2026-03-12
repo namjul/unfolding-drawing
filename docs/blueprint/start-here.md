@@ -128,6 +128,16 @@ Use this to understand:
 
 This defines the current recommendation for `dope`.
 
+### 9. [data-oriented-programming.md](./data-oriented-programming.md)
+
+Use this to understand:
+
+- whether the project should generally adopt a data-oriented-programming frame
+- where that frame is strongly helpful
+- where it should stop and remain only a bias
+
+This defines the broader programming-model stance for the blueprint.
+
 ## Optional historical context
 
 If you need evidence from the earlier system rather than forward-looking guidance, use:
@@ -153,5 +163,6 @@ When building the new system, move in this order:
 10. build system
 11. dependency triage
 12. dope evaluation
+13. data-oriented programming
 
 Only go to `source-analysis/` when you need to confirm what the old system actually implemented or what complexity should be left behind.

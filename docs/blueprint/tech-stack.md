@@ -198,8 +198,11 @@ The current stack direction is:
 - [build-system.md](./build-system.md)
 - [tech-stack-evaluation.md](./tech-stack-evaluation.md)
 - [dope-evaluation.md](./dope-evaluation.md)
+- [data-oriented-programming.md](./data-oriented-programming.md)
 
 Use [dope-evaluation.md](./dope-evaluation.md) for the current stance on data-oriented programming helpers and why `dope` is treated as a style reference or selective vendored utility source rather than a core dependency.
+
+Use [data-oriented-programming.md](./data-oriented-programming.md) for the broader decision to treat plain data and plain functions as the default frame for document and scene code.
 
 ## External references
 

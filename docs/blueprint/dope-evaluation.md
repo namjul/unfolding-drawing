@@ -6,6 +6,10 @@ Reference:
 
 - <https://github.com/gordonbrander/dope>
 
+See also:
+
+- [data-oriented-programming.md](./data-oriented-programming.md) for the broader project stance on where data-oriented programming is generally helpful in this blueprint
+
 ## Short answer
 
 - Use `dope` as a conceptual reference.

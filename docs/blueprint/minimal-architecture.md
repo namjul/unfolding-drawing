@@ -173,6 +173,7 @@ Prefer:
 See also:
 
 - [dope-evaluation.md](./dope-evaluation.md) for the current stance on data-oriented helper libraries and selective vendoring
+- [data-oriented-programming.md](./data-oriented-programming.md) for the broader project stance on plain data, plain functions, and where that frame should stop
 
 ## Suggested file shape
 
