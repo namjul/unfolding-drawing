@@ -46,6 +46,38 @@ Use this to understand:
 
 This defines the pre-core validation gate for the new project.
 
+### 3b. [data-model.md](./data-model.md)
+
+Use this to understand:
+
+- the initial persisted schema
+- what belongs in persisted state vs transient state
+- IDs, ownership rules, and invariants
+
+This defines the initial document contract for the new project.
+
+### 3c. [canvas-model.md](./canvas-model.md)
+
+Use this to understand:
+
+- coordinate spaces
+- viewport rules
+- scene derivation
+- hit testing and selection order
+
+This defines the initial canvas/runtime contract for the new project.
+
+### 3d. [milestone-01.md](./milestone-01.md)
+
+Use this to understand:
+
+- the first real implementation milestone after the renderer spike
+- exact scope
+- explicit non-goals
+- done criteria
+
+This defines the first coherent build target.
+
 ### 4. [tech-stack.md](./tech-stack.md)
 
 Use this to understand:
@@ -113,10 +145,13 @@ When building the new system, move in this order:
 2. minimal architecture
 3. incremental rebuild path
 4. milestone 0
-5. tech stack
-6. tech stack evaluation
-7. build system
-8. dependency triage
-9. dope evaluation
+5. data model
+6. canvas model
+7. milestone 1
+8. tech stack
+9. tech stack evaluation
+10. build system
+11. dependency triage
+12. dope evaluation
 
 Only go to `source-analysis/` when you need to confirm what the old system actually implemented or what complexity should be left behind.
