@@ -7,6 +7,22 @@ The folder now has two roles:
 - `blueprint/` for the new project starting from an empty repository
 - `source-analysis/` for historical evidence from the earlier vibecoded project
 
+## Documentation contract
+
+Use the documents in this order of authority:
+
+- `../GLOSSARY.md` for product intent, user-experience principles, and named domain terms
+- `blueprint/` for the current v1 implementation contract
+- `source-analysis/` for evidence from the earlier repository
+
+When `GLOSSARY.md` and `blueprint/` differ, do not leave the difference implicit.
+
+Label it as one of:
+
+- `v1 simplification`
+- `deferred concept`
+- `historical or unresolved`
+
 ## If you are starting the new project
 
 Start here:
@@ -38,6 +54,8 @@ These documents are not the new starting point. They exist to preserve:
 Treat `blueprint/` as instructions.
 
 Treat `source-analysis/` as evidence.
+
+Treat `GLOSSARY.md` as the product and terminology anchor.
 
 ## Agent handoff
 

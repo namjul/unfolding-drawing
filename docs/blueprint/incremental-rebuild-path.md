@@ -14,8 +14,19 @@ Each stage must end with:
 
 - a working app
 - one clear interaction center
+- one visible explanation of what the user can do next
 - no unused abstraction
 - one smallest next step that extends the current system rather than replacing it
+
+## Guidance rule
+
+The concrete guide UI can stay minimal at every stage.
+
+What cannot be deferred is the guidance behavior:
+
+- current selection or focus must be legible
+- current draft state must be legible
+- valid next actions must be visible without tool hunting
 
 ## Milestone 0: Renderer and stack spike
 
@@ -87,10 +98,12 @@ Outcome:
 - stage changes
 - commit or reject them
 - persist place state locally
+- record committed transformations and show minimal history
 
 Add:
 
 - `Place`
+- `Transformation`
 - local persistence
 - `SelectionState`
 - `PendingTransformationState`
@@ -99,10 +112,13 @@ Add:
 - `deletePlace`
 - `commit`
 - `reject`
+- history recording on commit
+- minimal history list
 
 Why coherent:
 
 - this is the smallest system that already expresses persistent center formation and revision
+- it remembers intervention from the first persistent milestone instead of treating history as optional later
 
 Failure test:
 
@@ -146,28 +162,7 @@ Why coherent:
 
 - the drawing becomes a graph rather than only a hierarchy
 
-## Stage 4: Transformation memory
-
-Outcome:
-
-- every committed change is recorded
-- history can be inspected
-
-Add:
-
-- `Transformation`
-- history recording on commit
-- history list in inspector
-
-Why coherent:
-
-- the system now remembers intervention, not only current state
-
-Note:
-
-- if transformation history is considered part of system identity from the first usable version, merge this stage into Stage 1
-
-## Stage 5: Circular field
+## Stage 4: Circular field
 
 Outcome:
 
@@ -186,7 +181,7 @@ Why coherent:
 
 - this is the first true field behavior and introduces structured placement cleanly
 
-## Stage 6: Axis
+## Stage 5: Axis
 
 Outcome:
 
@@ -205,7 +200,7 @@ Why coherent:
 
 - the system now supports both circular and linear organization
 
-## Stage 7: Split connection
+## Stage 6: Split connection
 
 Outcome:
 
@@ -220,7 +215,7 @@ Why coherent:
 
 - explicit relations become editable structure rather than fixed links
 
-## Stage 8: Bend organizer
+## Stage 7: Bend organizer
 
 Outcome:
 
@@ -237,7 +232,7 @@ Why coherent:
 
 - organizer behavior now applies to relations as well as place-owned structures
 
-## Stage 9: Repeater
+## Stage 8: Repeater
 
 Outcome:
 
@@ -256,7 +251,7 @@ Why coherent:
 
 - repeater is the most complex organizer and should appear only after simpler organizers are stable
 
-## Stage 10: Full inspector
+## Stage 9: Full inspector
 
 Outcome:
 
@@ -273,7 +268,7 @@ Why coherent:
 
 - the reflective side of the system catches up to the full drawing surface
 
-## Stage 11: Interaction refinement
+## Stage 10: Interaction refinement
 
 Outcome:
 
@@ -348,13 +343,12 @@ Do not introduce:
 2. persistent places with commit/reject
 3. hierarchy
 4. explicit relations
-5. transformation memory
-6. circular field
-7. axis
-8. split connection
-9. bend organizer
-10. repeater
-11. full inspector
-12. interaction refinement
+5. circular field
+6. axis
+7. split connection
+8. bend organizer
+9. repeater
+10. full inspector
+11. interaction refinement
 
 That order keeps the system coherent while adding complexity only when the previous center is already stable.

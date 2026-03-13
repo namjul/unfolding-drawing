@@ -98,6 +98,7 @@ Responsibilities:
 - render persisted state
 - render pending previews
 - perform hit testing
+- surface direct contextual affordances such as selection highlights and transformation handles when needed
 - translate pointer and keyboard input into updates to `interaction-state` and calls to `drawing-ops`
 
 Notes:
@@ -121,6 +122,7 @@ Responsibilities:
 
 - display structure
 - display history
+- show the current action context and valid next steps
 - expose selection, commit, reject, zoom, reset, and transform controls
 
 ## Explicit data flow
@@ -150,6 +152,21 @@ Responsibilities:
 
 - `drawing-state` + `interaction-state` -> `canvas`
 - `drawing-state` + `interaction-state` -> `inspector`
+
+## Guidance contract
+
+The user must always be able to answer two questions from the current UI state:
+
+- what is currently selected or being transformed
+- what actions are valid next
+
+This is a required behavior contract, not a requirement to build a separate guide framework.
+
+Keep the implementation minimal:
+
+- let `canvas` provide spatial affordances
+- let `inspector` or controls provide explicit next-step guidance
+- avoid adding a dedicated guide subsystem unless the simpler arrangement becomes unclear
 
 ## Minimal abstraction policy
 

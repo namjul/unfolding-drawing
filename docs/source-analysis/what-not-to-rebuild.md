@@ -16,7 +16,7 @@ It is a negative filter for the rebuild, not a description of the new target arc
 
 - wrapper layers around one concrete data store
 - separate persistence models for every organizer variant without proof that they must stay separate
-- a guide structure more elaborate than the essential workflow requires
+- a guide framework more elaborate than the essential workflow requires
 
 ### Dead or weak features
 
@@ -37,6 +37,10 @@ Use it as a suspicion list during implementation:
 
 - if a proposed rebuild choice resembles one of these patterns, stop and justify it
 - if the justification depends only on future flexibility, reject it
+
+This document is not an argument against continuous contextual guidance.
+
+The risk is extra guide machinery, not the product requirement that the user should always be able to see what they can do next.
 
 ## See also
 

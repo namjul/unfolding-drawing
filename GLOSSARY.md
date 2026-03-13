@@ -689,6 +689,31 @@ Every non-trivial claim should have at least one contact test.
 
 ## Application Specific Terms
 
+### Current Blueprint Status
+
+The glossary contains both enduring product concepts and older domain language that the current blueprint intentionally simplifies.
+
+Use these categories when reading the rest of this section:
+
+**Active in the current blueprint**
+
+- `Place`
+- `Connection` / line-level relation
+- `Organizer` concepts including `Axis`, `Circular Field`, `Bend`, and `Repeater`
+- `Transformation`, including `Commit` and `Reject`
+- `Drawing Guide` as a required behavior: the user should always be able to tell what they can do next
+
+**Deferred from the current blueprint**
+
+- `Parent Drawing Object` as a universal persisted contract for every entity
+- `Guide Drawing Object` and `Scaffolding` as strict persisted visibility semantics
+- `Line Segment End` as a first-class entity
+- detailed echo/orphan ontology beyond repeater behavior that is directly needed
+
+**Historical or unresolved**
+
+- duplicated or incomplete repeater/orphan entries in this glossary are historical notes, not implementation contract
+
 ### Canvas
 The canvas is an infinite vector graphics drawing area.
 
@@ -765,6 +790,8 @@ They should appear when a drawing object and a transformation have been selected
 Handles should be clearly distinct in order to attract the attention of the user (default: a small full green square).
 Handles should disappear when a transformation is completed (kept or discarded).
 
+In the current blueprint this is an affordance requirement, not yet a commitment to one specific handle system.
+
 ### Repeater
 Repeaters are a family of scaffolding objects that repeat descendant drawing objects.
 Each repeater drawing object provides a different way of generating repetition.
@@ -794,12 +821,11 @@ Example 3 - a pattern of show3, hide1; eg: in a 16 node circular repeater this w
 When a alternating repetition pattern is created a user can decide on which axis in the repeater it should begin.
 This would make it possible, for example, to create different repetitions on odd and even axes.
 
-## Orhpaned Echo
+### Orphaned Echo
 An echo drawing object can be removed from its repeater and continue to exist as an independent drawing object, when this happens it becomes an orphan.
 An orphaned echo drawing object does not change when any of its formerly related drawing objects are csuggesthanged.
 
-### Circular Repeater
-A cicrular repeater generates
+This term is currently deferred from the blueprint until repeater behavior requires it.
 
 ## Drawing Guide
 In most drawing tools a user faces many tools and choices that can be overwhelming and complicated to use (unless you are a trained professional).
@@ -807,6 +833,8 @@ In this application there they are constantly guided.
 The drawing guide always makes clear to a user where they are and what they can do next (which depends on where they are).
 As a result, the user experience is simplified because at any given time the user only has access to relevant tools.
 The drawing guide ias based on a core drawing process that repeats itself.
+
+In the current blueprint this is a required product behavior, but not a commitment to a separate guide framework or wizard.
 
 ### Fundamental Drawing Process
 

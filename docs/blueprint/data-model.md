@@ -22,6 +22,18 @@ The goal is to prevent drift in `drawing-state` and `drawing-ops`.
 - Use stable IDs for all persisted entities.
 - Prefer explicit ownership over inferred relationships.
 
+## Blueprint simplifications against older glossary ontology
+
+The v1 persisted model is intentionally flatter than some older glossary language.
+
+It does **not** currently require:
+
+- every drawing object to be stored as a node in one universal parent-object tree
+- line segment ends to exist as first-class persisted entities
+- scaffolding-only or guide-only visibility semantics to be encoded in the base schema
+
+If later implementation evidence shows those distinctions are necessary, add them explicitly to the model instead of inferring them informally.
+
 ## Persisted entities
 
 ### 1. Place

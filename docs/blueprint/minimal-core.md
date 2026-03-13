@@ -8,6 +8,12 @@ It is written for a fresh implementation, not for the current repository layout.
 
 Preserve the essential behavior of the drawing system while keeping the domain as small and explicit as possible.
 
+## Cross-cutting product requirements
+
+- The system must provide continuous contextual guidance so the user can tell where they are and what they can do next.
+- The exact UI form of that guidance is not fixed. It may live in inspector controls, canvas affordances, or a small dedicated guide surface.
+- Transformation history is part of the first usable persistent editor. Replay or animation UI can wait, but committed intervention must be recorded from the start.
+
 ## Core domain concepts
 
 ### 1. Place
@@ -239,10 +245,22 @@ Minimum fields:
 ## What is not part of the minimal core
 
 - a particular UI layout
-- a specific guide or wizard structure
+- a fixed guide UI or wizard implementation
 - a particular framework wrapper stack
 - separate persistence models for every organizer variant
 - specialized endpoint entities unless proven necessary
+
+## V1 modeling note
+
+The current blueprint intentionally collapses parts of the older glossary ontology into a flatter implementation model.
+
+That means v1 does **not** require:
+
+- every persisted entity to participate in one universal parent-object tree
+- separate endpoint entities for connections
+- scaffolding-only visibility semantics to be encoded in the base persisted model
+
+Promote those concepts back into the implementation contract only if current evidence shows the flatter model is insufficient.
 
 ## Summary
 
