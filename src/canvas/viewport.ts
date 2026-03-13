@@ -1,4 +1,4 @@
-import type { SceneBounds } from './spikeScene';
+import type { SceneBounds } from './scene';
 
 export interface Viewport {
   x: number;

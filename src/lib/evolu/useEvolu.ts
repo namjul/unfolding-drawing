@@ -1,5 +1,6 @@
-import type { Evolu } from '@evolu/common/evolu';
+import type { Evolu } from '@evolu/common';
 import { useContext } from 'solid-js';
+import type { Schema } from '../evolu-db';
 import type { createUseEvolu } from './createUseEvolu';
 import { EvoluContext } from './EvoluContext.js';
 
@@ -9,12 +10,13 @@ import { EvoluContext } from './EvoluContext.js';
  * This is intended for internal usage. Applications should use
  * {@link createUseEvolu}, which provides a correctly typed instance.
  */
-export const useEvolu = (): Evolu => {
+export const useEvolu = (): Evolu<typeof Schema> => {
   const evolu = useContext(EvoluContext);
   if (evolu == null) {
     throw new Error(
       'Could not find Evolu context value. Ensure the component is wrapped in an <EvoluProvider>.',
     );
   }
-  return evolu as Evolu;
+
+  return evolu;
 };

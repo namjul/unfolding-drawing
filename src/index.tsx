@@ -1,5 +1,7 @@
 import { render } from 'solid-js/web';
 import App from './App';
+import { EvoluProvider } from './lib/evolu';
+import { evolu } from './lib/evolu-db';
 import './index.css';
 
 const root = document.getElementById('root');
@@ -11,5 +13,12 @@ if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
 }
 
 if (root) {
-  render(() => <App />, root);
+  render(
+    () => (
+      <EvoluProvider value={evolu}>
+        <App />
+      </EvoluProvider>
+    ),
+    root,
+  );
 }

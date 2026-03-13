@@ -13,4 +13,4 @@ import { useEvolu } from './useEvolu.js';
  */
 export const createUseEvolu = <S extends EvoluSchema>(
   _evolu: Evolu<S>,
-): (() => Evolu<S>) => useEvolu as () => Evolu<S>;
+): (() => Evolu<S>) => useEvolu as unknown as () => Evolu<S>;

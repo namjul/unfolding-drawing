@@ -1,7 +1,11 @@
-import type { SyntheticScene } from './spikeScene';
+interface HitTestablePlace {
+  id: string;
+  x: number;
+  y: number;
+}
 
 export const hitTestPlace = (
-  scene: SyntheticScene,
+  places: ReadonlyArray<HitTestablePlace>,
   worldX: number,
   worldY: number,
   radius: number,
@@ -10,7 +14,7 @@ export const hitTestPlace = (
   let closestId: string | null = null;
   let closestDistance = Number.POSITIVE_INFINITY;
 
-  for (const place of scene.places) {
+  for (const place of places) {
     const dx = place.x - worldX;
     const dy = place.y - worldY;
     const distanceSquared = dx * dx + dy * dy;
