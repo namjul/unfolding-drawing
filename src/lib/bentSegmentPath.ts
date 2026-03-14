@@ -60,9 +60,27 @@ function pointAt(x1: number, y1: number, x2: number, y2: number, t: number) {
   };
 }
 
+/** Nearest point on circle (cx,cy) radius r to point (px,py). */
+function nearestPointOnCircle(
+  cx: number,
+  cy: number,
+  r: number,
+  px: number,
+  py: number,
+): { x: number; y: number } {
+  const dx = px - cx;
+  const dy = py - cy;
+  const d = Math.hypot(dx, dy);
+  if (d < 1e-10) return { x: cx + r, y: cy };
+  return {
+    x: cx + (r * dx) / d,
+    y: cy + (r * dy) / d,
+  };
+}
+
 /**
- * True if the circle intersects the open segment (x1,y1)-(x2,y2), i.e. there is
- * at least one intersection at parameter t with 0 < t < 1 (not at an endpoint).
+ * True if the circle intersects the segment (x1,y1)-(x2,y2). Includes the case
+ * where a segment endpoint lies on or inside the circle (bend-at-end geometry).
  */
 function circleIntersectsSegment(
   x1: number,
@@ -73,6 +91,9 @@ function circleIntersectsSegment(
   cy: number,
   r: number,
 ): boolean {
+  const distA = Math.hypot(x1 - cx, y1 - cy);
+  const distB = Math.hypot(x2 - cx, y2 - cy);
+  if (distA <= r || distB <= r) return true;
   const ts = lineCircleIntersections(x1, y1, x2, y2, cx, cy, r);
   return ts.some((t) => t > 0.01 && t < 0.99);
 }
@@ -392,19 +413,37 @@ export function buildBentSegmentPath(
       bendA.radius,
     );
     const otherThanEndA = ts.filter((t) => t > 0.01);
-    if (otherThanEndA.length === 0) return `M ${x1} ${y1} L ${x2} ${y2}`;
-    const t = Math.max(...otherThanEndA);
-    const P = pointAt(x1, y1, x2, y2, t);
+    if (otherThanEndA.length > 0) {
+      const t = Math.max(...otherThanEndA);
+      const P = pointAt(x1, y1, x2, y2, t);
+      const arc = arcAlongCircle(
+        P.x,
+        P.y,
+        x1,
+        y1,
+        bendA.centerX,
+        bendA.centerY,
+        bendA.radius,
+      );
+      return `M ${x2} ${y2} L ${P.x} ${P.y} ${arc}`;
+    }
+    const nearest = nearestPointOnCircle(
+      bendA.centerX,
+      bendA.centerY,
+      bendA.radius,
+      x2,
+      y2,
+    );
     const arc = arcAlongCircle(
-      P.x,
-      P.y,
+      nearest.x,
+      nearest.y,
       x1,
       y1,
       bendA.centerX,
       bendA.centerY,
       bendA.radius,
     );
-    return `M ${x2} ${y2} L ${P.x} ${P.y} ${arc}`;
+    return `M ${x2} ${y2} L ${nearest.x} ${nearest.y} ${arc}`;
   }
 
   if (!bendA && bendB) {
@@ -461,19 +500,37 @@ export function buildBentSegmentPath(
       bendB.radius,
     );
     const otherThanEnd = ts.filter((t) => t > 0.01);
-    if (otherThanEnd.length === 0) return `M ${x1} ${y1} L ${x2} ${y2}`;
-    const t = Math.max(...otherThanEnd);
-    const P = pointAt(x1, y1, x2, y2, t);
+    if (otherThanEnd.length > 0) {
+      const t = Math.max(...otherThanEnd);
+      const P = pointAt(x1, y1, x2, y2, t);
+      const arc = arcAlongCircle(
+        P.x,
+        P.y,
+        x2,
+        y2,
+        bendB.centerX,
+        bendB.centerY,
+        bendB.radius,
+      );
+      return `M ${x1} ${y1} L ${P.x} ${P.y} ${arc}`;
+    }
+    const nearest = nearestPointOnCircle(
+      bendB.centerX,
+      bendB.centerY,
+      bendB.radius,
+      x1,
+      y1,
+    );
     const arc = arcAlongCircle(
-      P.x,
-      P.y,
+      nearest.x,
+      nearest.y,
       x2,
       y2,
       bendB.centerX,
       bendB.centerY,
       bendB.radius,
     );
-    return `M ${x1} ${y1} L ${P.x} ${P.y} ${arc}`;
+    return `M ${x1} ${y1} L ${nearest.x} ${nearest.y} ${arc}`;
   }
 
   if (bendA && bendB) {

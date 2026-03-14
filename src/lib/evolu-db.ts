@@ -122,6 +122,8 @@ export const Schema = {
     placeId: PlaceId,
     count: FiniteNumber,
     name: nullOr(String1000),
+    /** When set, this repeater is an echo; value is the canonical repeater id. */
+    repeaterEchoGroupId: nullOr(CircularRepeaterId),
   },
   lineSegmentEnd: {
     id: LineSegmentEndId,
@@ -134,11 +136,15 @@ export const Schema = {
     endBId: LineSegmentEndId,
     name: nullOr(String1000),
     isScaffolding: nullOr(FiniteNumber),
+    /** When set, this segment is part of a repeater echo group; all segments with the same id are one logical line. */
+    repeaterLineSegmentEchoGroupId: nullOr(LineSegmentId),
   },
   circularField: {
     id: CircularFieldId,
     placeId: PlaceId,
     radius: FiniteNumber,
+    /** Angle of the radius handle in radians (0 = east). Null = east when drawing. */
+    radiusHandleAngle: nullOr(FiniteNumber),
   },
   bendingCircularField: {
     id: BendingCircularFieldId,

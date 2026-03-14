@@ -46,6 +46,7 @@ interface DrawingGuideProps {
   pendingMove: boolean;
   pendingRotate: boolean;
   pendingAddLine: boolean;
+  pendingAddLineSegment: boolean;
   pendingAddCircularField: boolean;
   pendingModifyCircularField: boolean;
   pendingDeleteLineId: boolean;
@@ -67,6 +68,8 @@ interface DrawingGuideProps {
   pendingDeleteCircularRepeaterId: boolean;
   circularRepeaterCount: number;
   onRepeaterCountChange: (count: number) => void;
+  repetitionPatternEnabled: boolean;
+  onRepetitionPatternEnabledChange: (enabled: boolean) => void;
   alternatingPattern: { show: number; skip: number; start: number } | null;
   onAlternatingPatternChange: (
     show: number,
@@ -150,6 +153,7 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
     if (props.transformChoice === 'add') return 'Add Place';
     if (props.transformChoice === 'addRelated') return 'Add a Related Place';
     if (props.transformChoice === 'addLine') return 'Add Line';
+    if (props.transformChoice === 'addLineSegment') return 'Add Line Segment';
     if (props.transformChoice === 'move') return 'Move Place';
     if (props.transformChoice === 'moveCircularField')
       return 'Move Circular Field';
@@ -210,6 +214,8 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
         (props.pendingMoveBendingCircularField ||
           props.draggingBendingCircularFieldRadius)) ||
       (props.transformChoice === 'addLine' && !props.pendingAddLine) ||
+      (props.transformChoice === 'addLineSegment' &&
+        !props.pendingAddLineSegment) ||
       props.pendingSplitLine ||
       props.pendingAddAxis ||
       props.pendingModifyAxis ||
@@ -443,6 +449,13 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                       you placed a new place, drag it to reposition.
                     </p>
                   )}
+                  {props.transformChoice === 'addLineSegment' && (
+                    <p class={classes.guideText}>
+                      Click an existing place in the repeater to connect lines
+                      between echoes, or click empty space to create a new
+                      ending place and connect.
+                    </p>
+                  )}
                   {props.transformChoice === 'deleteLine' && (
                     <p class={classes.guideText}>This line will be deleted.</p>
                   )}
@@ -542,7 +555,7 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                           id="repeater-count"
                           type="number"
                           min={2}
-                          max={24}
+                          max={108}
                           value={props.circularRepeaterCount}
                           onInput={(e) => {
                             const n = Number(
@@ -562,10 +575,28 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                     <>
                       <p class={classes.guideText}>
                         {props.transformChoice === 'addPlaceOnCircularRepeater'
-                          ? 'Click to set position; drag to move. Use the pattern below to show on every axis or an alternating subset.'
-                          : 'Drag any echo to move all together. Use the pattern below to change which axes show this place.'}
+                          ? 'Click to set position; drag to move. Enable repetition below to show on a subset of axes.'
+                          : 'Drag any echo to move all together. Enable repetition below to limit which axes show this place.'}
                       </p>
-                      {props.alternatingPattern && (
+                      <div class="mt-3 flex flex-col gap-2">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={props.repetitionPatternEnabled}
+                            onChange={(e) =>
+                              props.onRepetitionPatternEnabledChange(
+                                (e.target as HTMLInputElement).checked,
+                              )
+                            }
+                            class="rounded border-slate-300"
+                          />
+                          <span class="text-sm">
+                            Use repetition pattern
+                          </span>
+                        </label>
+                      </div>
+                      {props.repetitionPatternEnabled &&
+                        props.alternatingPattern && (
                         <div class="mt-3 flex flex-col gap-2">
                           <div class="flex items-center gap-2">
                             <label class="text-sm w-12 shrink-0" for="alt-show">

@@ -42,7 +42,8 @@ export type TransformId =
   | 'deleteCircularRepeater'
   | 'deleteBendingCircularField'
   | 'splitLine'
-  | 'rotate';
+  | 'rotate'
+  | 'addLineSegment';
 
 export type TransformChoice = TransformId | null;
 
@@ -64,6 +65,11 @@ export const TRANSFORMS: readonly TransformDef[] = [
     allowedSelectionTypes: ['place', 'placeOnCircularRepeater'],
   },
   { id: 'addLine', label: 'Add Line', allowedSelectionTypes: ['place'] },
+  {
+    id: 'addLineSegment',
+    label: 'Add Line Segment',
+    allowedSelectionTypes: ['placeOnCircularRepeater'],
+  },
   {
     id: 'addCircularField',
     label: 'Add Circular Field',
@@ -87,7 +93,7 @@ export const TRANSFORMS: readonly TransformDef[] = [
   {
     id: 'addCircularRepeater',
     label: 'Add Circular Repeater',
-    allowedSelectionTypes: ['place'],
+    allowedSelectionTypes: ['place', 'placeOnCircularRepeater'],
   },
   {
     id: 'addPlaceOnCircularRepeater',
