@@ -95,14 +95,18 @@ const App = () => {
           activePlace={selectedPlace}
           canStageDelete={canStageDelete}
           onCommitPendingChange={drawingOps.commitPending}
-          onEnterAddPlaceMode={interaction.enterAddPlaceMode}
           onRejectPendingChange={interaction.rejectPending}
           onResetViewport={resetViewport}
           onStageDelete={handleStageDelete}
           operationMessage={drawingOps.operationMessage}
           pendingTransformation={interaction.pendingTransformation}
           selectedPlaceId={interaction.selectedPlaceId}
-          tool={interaction.tool}
+          selectionTarget={interaction.selectionTarget}
+          awaitingTransformationTarget={
+            interaction.awaitingTransformationTarget
+          }
+          onBeginAddPlace={interaction.beginAddPlace}
+          onBeginMovePlace={interaction.beginMovePlace}
           transformations={drawing.transformations}
           viewport={interaction.viewport}
         />
@@ -110,7 +114,7 @@ const App = () => {
       <section class="basis-1/5 grow min-h-0 flex flex-col ">
         <Canvas
           hoveredPlaceId={interaction.hoveredPlaceId}
-          onSelectPlace={interaction.setSelectedPlaceId}
+          onSelectPlace={interaction.setSelectionTarget}
           onStageAddPlace={interaction.stageAddPlace}
           onStageMovePlace={interaction.stageMovePlace}
           onSurfaceSizeChange={setSurfaceSize}
@@ -119,8 +123,14 @@ const App = () => {
           pendingTransformation={interaction.pendingTransformation}
           places={displayPlaces}
           selectedPlaceId={interaction.selectedPlaceId}
+          selectionTarget={interaction.selectionTarget}
+          awaitingTransformationTarget={
+            interaction.awaitingTransformationTarget
+          }
+          onClearAwaitingTransformation={
+            interaction.clearAwaitingTransformationTarget
+          }
           setViewport={interaction.setViewport}
-          tool={interaction.tool}
           viewport={interaction.viewport}
         />
       </section>

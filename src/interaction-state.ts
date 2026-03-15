@@ -2,9 +2,10 @@ import type { Setter } from 'solid-js';
 import { createSignal } from 'solid-js';
 import type { Viewport } from './canvas/viewport';
 import {
+  type AwaitingTransformationTarget,
   createNoPendingTransformation,
   type PendingTransformationState,
-  type ToolMode,
+  type SelectionTarget,
 } from './drawing/types';
 import type { PlaceId } from './lib/evolu-db';
 
@@ -23,14 +24,17 @@ export interface InteractionState {
   pendingTransformation: () => PendingTransformationState;
   rejectPending: () => void;
   selectedPlaceId: () => string | null;
+  selectionTarget: () => SelectionTarget;
+  setSelectionTarget: (target: SelectionTarget) => void;
+  awaitingTransformationTarget: () => AwaitingTransformationTarget;
+  beginAddPlace: () => void;
+  beginMovePlace: () => void;
+  clearAwaitingTransformationTarget: () => void;
   setHoveredPlaceId: Setter<string | null>;
-  setSelectedPlaceId: Setter<string | null>;
   setViewport: Setter<Viewport>;
   stageAddPlace: (x: number, y: number) => boolean;
   stageDeletePlace: (placeId: PlaceId) => boolean;
   stageMovePlace: (placeId: PlaceId, x: number, y: number) => boolean;
-  tool: () => ToolMode;
-  enterAddPlaceMode: () => void;
   updatePendingMove: (x: number, y: number) => void;
   viewport: () => Viewport;
 }
@@ -41,20 +45,19 @@ export const createInteractionState = (): InteractionState => {
     y: 0,
     scale: 1,
   });
-  const [selectedPlaceId, setSelectedPlaceId] = createSignal<string | null>(
-    null,
-  );
+  const [selectionTarget, setSelectionTarget] = createSignal<SelectionTarget>({
+    kind: 'canvas',
+  });
   const [hoveredPlaceId, setHoveredPlaceId] = createSignal<string | null>(null);
-  const [tool, setTool] = createSignal<ToolMode>('select');
   const [pendingTransformation, setPendingTransformation] =
     createSignal<PendingTransformationState>(createNoPendingTransformation());
+  const [awaitingTransformationTarget, setAwaitingTransformationTarget] =
+    createSignal<AwaitingTransformationTarget>({ kind: 'none' });
 
-  const enterAddPlaceMode = () => {
-    if (pendingTransformation().kind !== 'none') {
-      return;
-    }
-
-    setTool('addPlace');
+  // Backward compatibility accessor
+  const selectedPlaceId = () => {
+    const target = selectionTarget();
+    return target.kind === 'place' ? target.placeId : null;
   };
 
   const stageAddPlace = (x: number, y: number) => {
@@ -73,9 +76,8 @@ export const createInteractionState = (): InteractionState => {
     };
 
     setPendingTransformation({ kind: 'addPlace', place: nextPlace });
-    setSelectedPlaceId(nextPlace.id);
+    setSelectionTarget({ kind: 'place', placeId: nextPlace.id });
     setHoveredPlaceId(nextPlace.id);
-    setTool('select');
 
     return true;
   };
@@ -97,13 +99,9 @@ export const createInteractionState = (): InteractionState => {
         pending.kind === 'movePlace' && pending.placeId === placeId
           ? pending.from
           : { x, y },
-      to:
-        pending.kind === 'movePlace' && pending.placeId === placeId
-          ? pending.to
-          : { x, y },
+      to: { x, y },
     });
-    setSelectedPlaceId(placeId);
-    setTool('select');
+    setSelectionTarget({ kind: 'place', placeId });
 
     return true;
   };
@@ -123,13 +121,12 @@ export const createInteractionState = (): InteractionState => {
 
   const stageDeletePlace = (placeId: PlaceId) => {
     if (pendingTransformation().kind !== 'none') {
-      return false;
+      rejectPending();
     }
 
     setPendingTransformation({ kind: 'deletePlace', placeId });
-    setSelectedPlaceId(placeId);
+    setSelectionTarget({ kind: 'place', placeId });
     setHoveredPlaceId(placeId);
-    setTool('select');
 
     return true;
   };
@@ -139,16 +136,41 @@ export const createInteractionState = (): InteractionState => {
 
     setPendingTransformation(createNoPendingTransformation());
     setHoveredPlaceId(null);
-    setTool('select');
+    clearAwaitingTransformationTarget();
 
     if (pending.kind === 'addPlace') {
-      setSelectedPlaceId(null);
+      setSelectionTarget({ kind: 'canvas' });
       return;
     }
 
     if (pending.kind === 'movePlace' || pending.kind === 'deletePlace') {
-      setSelectedPlaceId(pending.placeId);
+      setSelectionTarget({ kind: 'place', placeId: pending.placeId });
     }
+  };
+
+  const clearAwaitingTransformationTarget = () => {
+    setAwaitingTransformationTarget({ kind: 'none' });
+  };
+
+  const beginAddPlace = () => {
+    if (pendingTransformation().kind !== 'none') {
+      rejectPending();
+    }
+    setAwaitingTransformationTarget({ kind: 'addPlace' });
+  };
+
+  const beginMovePlace = () => {
+    const target = selectionTarget();
+    if (target.kind !== 'place') return;
+
+    if (pendingTransformation().kind !== 'none') {
+      rejectPending();
+    }
+
+    setAwaitingTransformationTarget({
+      kind: 'movePlace',
+      placeId: target.placeId as PlaceId,
+    });
   };
 
   return {
@@ -156,14 +178,17 @@ export const createInteractionState = (): InteractionState => {
     pendingTransformation,
     rejectPending,
     selectedPlaceId,
+    selectionTarget,
+    setSelectionTarget,
+    awaitingTransformationTarget,
+    beginAddPlace,
+    beginMovePlace,
+    clearAwaitingTransformationTarget,
     setHoveredPlaceId,
-    setSelectedPlaceId,
     setViewport,
     stageAddPlace,
     stageDeletePlace,
     stageMovePlace,
-    tool,
-    enterAddPlaceMode,
     updatePendingMove,
     viewport,
   };

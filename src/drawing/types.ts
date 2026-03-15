@@ -3,7 +3,15 @@ import type { PlaceId, TransformationId } from '../lib/evolu-db';
 
 export type PlacementMode = 'free';
 export type TransformationKind = 'addPlace' | 'movePlace' | 'deletePlace';
-export type ToolMode = 'select' | 'addPlace';
+
+export type SelectionTarget =
+  | { kind: 'canvas' }
+  | { kind: 'place'; placeId: string };
+
+export type AwaitingTransformationTarget =
+  | { kind: 'none' }
+  | { kind: 'addPlace' }
+  | { kind: 'movePlace'; placeId: PlaceId };
 
 export interface PersistedPlace {
   id: PlaceId;

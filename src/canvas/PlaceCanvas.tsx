@@ -15,9 +15,10 @@ import {
   onMount,
 } from 'solid-js';
 import type {
+  AwaitingTransformationTarget,
   DisplayPlace,
   PendingTransformationState,
-  ToolMode,
+  SelectionTarget,
 } from '../drawing/types';
 import type { PlaceId } from '../lib/evolu-db';
 import { hitTestPlace } from './hitTest';
@@ -31,6 +32,7 @@ interface PaintSet {
   place: Paint;
   selectedRing: Paint;
   stagedDelete: Paint;
+  canvasSelectionBorder: Paint;
 }
 
 interface CanvasRuntime {
@@ -41,7 +43,7 @@ interface CanvasRuntime {
 
 interface PlaceCanvasProps {
   hoveredPlaceId: Accessor<string | null>;
-  onSelectPlace: Setter<string | null>;
+  onSelectPlace: (target: SelectionTarget) => void;
   onStageAddPlace: (x: number, y: number) => boolean;
   onStageMovePlace: (placeId: PlaceId, x: number, y: number) => boolean;
   onSurfaceSizeChange: Setter<{ width: number; height: number }>;
@@ -50,8 +52,10 @@ interface PlaceCanvasProps {
   pendingTransformation: Accessor<PendingTransformationState>;
   places: Accessor<ReadonlyArray<DisplayPlace>>;
   selectedPlaceId: Accessor<string | null>;
+  selectionTarget: Accessor<SelectionTarget>;
+  awaitingTransformationTarget: Accessor<AwaitingTransformationTarget>;
+  onClearAwaitingTransformation: () => void;
   setViewport: Setter<Viewport>;
-  tool: Accessor<ToolMode>;
   viewport: Accessor<Viewport>;
 }
 
@@ -76,7 +80,7 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
   let panOrigin: Viewport | null = null;
   let activeDragMode: 'pan' | 'move' | 'idle' = 'idle';
   let moveCandidateId: PlaceId | null = null;
-  let moveOffset = { x: 0, y: 0 };
+  const moveOffset = { x: 0, y: 0 };
 
   const [status, setStatus] = createSignal('Loading CanvasKit...');
   const [canvasSize, setCanvasSize] = createSignal({ width: 0, height: 0 });
@@ -140,6 +144,7 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
     runtime.paints.place.delete();
     runtime.paints.selectedRing.delete();
     runtime.paints.stagedDelete.delete();
+    runtime.paints.canvasSelectionBorder.delete();
     runtime = null;
   };
 
@@ -174,6 +179,11 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
     selectedRing.setStyle(canvasKit.PaintStyle.Stroke);
     selectedRing.setColor(canvasKit.Color(248, 113, 113, 1));
 
+    const canvasSelectionBorder = new canvasKit.Paint();
+    canvasSelectionBorder.setAntiAlias(true);
+    canvasSelectionBorder.setStyle(canvasKit.PaintStyle.Stroke);
+    canvasSelectionBorder.setColor(canvasKit.Color(248, 113, 113, 1));
+
     return {
       canvasGrid,
       draftPlace,
@@ -181,6 +191,7 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
       place,
       selectedRing,
       stagedDelete,
+      canvasSelectionBorder,
     };
   };
 
@@ -258,6 +269,46 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
     }
 
     canvas.restore();
+
+    // Draw canvas selection border when canvas is selected
+    const selectionTarget = props.selectionTarget();
+    if (selectionTarget.kind === 'canvas') {
+      const size = canvasSize();
+      const borderWidth = 4;
+      const inset = borderWidth / 2;
+
+      runtime.paints.canvasSelectionBorder.setStrokeWidth(borderWidth);
+
+      // Draw 4 lines forming border
+      canvas.drawLine(
+        inset,
+        inset,
+        size.width - inset,
+        inset,
+        runtime.paints.canvasSelectionBorder,
+      );
+      canvas.drawLine(
+        size.width - inset,
+        inset,
+        size.width - inset,
+        size.height - inset,
+        runtime.paints.canvasSelectionBorder,
+      );
+      canvas.drawLine(
+        size.width - inset,
+        size.height - inset,
+        inset,
+        size.height - inset,
+        runtime.paints.canvasSelectionBorder,
+      );
+      canvas.drawLine(
+        inset,
+        inset,
+        inset,
+        size.height - inset,
+        runtime.paints.canvasSelectionBorder,
+      );
+    }
   };
 
   const resizeSurface = async (width: number, height: number) => {
@@ -371,24 +422,20 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
     moveCandidateId = null;
 
     if (hitPlace) {
-      props.onSelectPlace(hitPlace.id);
+      props.onSelectPlace({ kind: 'place', placeId: hitPlace.id });
     }
 
-    const pendingTransformation = props.pendingTransformation();
-
+    // If awaiting move transformation, prepare for drag
+    const awaiting = props.awaitingTransformationTarget();
     if (
-      activeDragMode !== 'pan' &&
+      awaiting.kind === 'movePlace' &&
       hitPlace &&
-      !hitPlace.isDraft &&
-      (pendingTransformation.kind === 'none' ||
-        (pendingTransformation.kind === 'movePlace' &&
-          pendingTransformation.placeId === hitPlace.id))
+      hitPlace.id === awaiting.placeId &&
+      activeDragMode !== 'pan'
     ) {
       moveCandidateId = hitPlace.id as PlaceId;
-      moveOffset = {
-        x: hitPlace.x - world.x,
-        y: hitPlace.y - world.y,
-      };
+      moveOffset.x = hitPlace.x - world.x;
+      moveOffset.y = hitPlace.y - world.y;
     }
 
     canvasElement.setPointerCapture(event.pointerId);
@@ -413,6 +460,7 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
       return;
     }
 
+    // Handle move place dragging when awaiting movePlace
     if (moveCandidateId && dragDistance >= dragThreshold) {
       const world = getWorldPoint(event.clientX, event.clientY);
       const currentPlace = props
@@ -423,6 +471,7 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
         return;
       }
 
+      // Stage the move if not already staged
       if (props.pendingTransformation().kind === 'none') {
         const didStageMove = props.onStageMovePlace(
           moveCandidateId,
@@ -461,14 +510,19 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
         28 / props.viewport().scale,
       );
 
-      if (
-        props.tool() === 'addPlace' &&
-        props.pendingTransformation().kind === 'none' &&
-        isTap
-      ) {
+      const awaiting = props.awaitingTransformationTarget();
+
+      if (awaiting.kind === 'addPlace' && isTap) {
         props.onStageAddPlace(world.x, world.y);
+        props.onClearAwaitingTransformation();
+      } else if (awaiting.kind === 'movePlace' && isTap) {
+        props.onStageMovePlace(awaiting.placeId, world.x, world.y);
       } else if (isTap) {
-        props.onSelectPlace(hitPlaceId);
+        if (hitPlaceId) {
+          props.onSelectPlace({ kind: 'place', placeId: hitPlaceId });
+        } else {
+          props.onSelectPlace({ kind: 'canvas' });
+        }
       }
     }
 

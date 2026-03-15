@@ -1,9 +1,10 @@
 import { type Accessor, For, type ParentComponent, Show } from 'solid-js';
 import type { Viewport } from '../canvas/viewport';
 import type {
+  AwaitingTransformationTarget,
   DisplayPlace,
   PendingTransformationState,
-  ToolMode,
+  SelectionTarget,
   TransformationEntry,
 } from '../drawing/types';
 
@@ -11,14 +12,16 @@ interface DrawingGuideProps {
   activePlace: Accessor<DisplayPlace | null>;
   canStageDelete: Accessor<boolean>;
   onCommitPendingChange: () => void;
-  onEnterAddPlaceMode: () => void;
   onRejectPendingChange: () => void;
   onResetViewport: () => void;
   onStageDelete: () => void;
   operationMessage: Accessor<string | null>;
   pendingTransformation: Accessor<PendingTransformationState>;
   selectedPlaceId: Accessor<string | null>;
-  tool: Accessor<ToolMode>;
+  selectionTarget: Accessor<SelectionTarget>;
+  awaitingTransformationTarget: Accessor<AwaitingTransformationTarget>;
+  onBeginAddPlace: () => void;
+  onBeginMovePlace: () => void;
   transformations: Accessor<ReadonlyArray<TransformationEntry>>;
   viewport: Accessor<Viewport>;
 }
@@ -82,15 +85,61 @@ const DrawingGuideProps = (props: DrawingGuideProps) => {
         </p>
       </Panel>
 
-      <Panel title="Tool">
-        <p class="mt-3">
-          Current tool: {props.tool() === 'addPlace' ? 'Add place' : 'Select'}
-        </p>
-        <div class="mt-3 flex flex-wrap gap-2">
-          <Button onClick={props.onEnterAddPlaceMode}>
-            Stage place from canvas click
-          </Button>
-        </div>
+      <Panel title="Selection">
+      <p class="text-sm text-slate-600 mt-2">Select a drawing object on the canvas or the canvas.</p>
+        <Show
+          when={props.selectionTarget().kind === 'place'}
+          fallback={<p class="mt-3 text-slate-600">Canvas selected</p>}
+        >
+          <Show
+            when={props.activePlace()}
+            fallback={
+              <p class="mt-3 text-rose-400">Selected place not found</p>
+            }
+          >
+            {(place) => (
+              <div class="mt-3">
+                <p class="font-medium">
+                  {place().name ?? `Place ${place().id.slice(0, 8)}`}
+                </p>
+                <p class="text-xs text-slate-500 mt-1">
+                  Position: ({Math.round(place().x)}, {Math.round(place().y)})
+                </p>
+              </div>
+            )}
+          </Show>
+        </Show>
+      </Panel>
+
+      <Panel title="Transformations">
+        <Show
+          when={props.selectionTarget().kind === 'canvas'}
+          fallback={
+            <div class="mt-3 flex flex-col gap-2">
+              <Button
+                disabled={props.pendingTransformation().kind !== 'none'}
+                onClick={props.onBeginMovePlace}
+              >
+                Move Place
+              </Button>
+              <Button
+                disabled={!props.canStageDelete()}
+                onClick={props.onStageDelete}
+              >
+                Delete Place
+              </Button>
+            </div>
+          }
+        >
+          <div class="mt-3 flex flex-col gap-2">
+            <Button
+              disabled={props.pendingTransformation().kind !== 'none'}
+              onClick={props.onBeginAddPlace}
+            >
+              Add Place
+            </Button>
+          </div>
+        </Show>
       </Panel>
 
       <Panel title="Pending change">
@@ -117,7 +166,7 @@ const DrawingGuideProps = (props: DrawingGuideProps) => {
         </Show>
       </Panel>
 
-      <Panel title="Selection">
+      <Panel title="Place Details">
         <Show
           when={props.activePlace()}
           fallback={
@@ -133,12 +182,6 @@ const DrawingGuideProps = (props: DrawingGuideProps) => {
               <Show when={place().isMarkedForDeletion}>
                 <p class="text-rose-300">Marked for deletion</p>
               </Show>
-              <Button
-                disabled={!props.canStageDelete()}
-                onClick={props.onStageDelete}
-              >
-                {place().isDraft ? 'Reject draft place' : 'Stage delete'}
-              </Button>
             </div>
           )}
         </Show>

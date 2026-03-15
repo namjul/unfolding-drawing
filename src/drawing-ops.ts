@@ -82,10 +82,16 @@ export const createDrawingOps = ({
           x: pending.place.x,
           y: pending.place.y,
         });
-        interaction.setSelectedPlaceId(result.value.id);
+        interaction.setSelectionTarget({
+          kind: 'place',
+          placeId: result.value.id,
+        });
         interaction.setHoveredPlaceId(result.value.id);
         interaction.rejectPending();
-        interaction.setSelectedPlaceId(result.value.id);
+        interaction.setSelectionTarget({
+          kind: 'place',
+          placeId: result.value.id,
+        });
         setOperationMessage('Place committed to local persistence.');
         return;
       }
@@ -107,7 +113,10 @@ export const createDrawingOps = ({
           to: pending.to,
         });
         interaction.rejectPending();
-        interaction.setSelectedPlaceId(pending.placeId);
+        interaction.setSelectionTarget({
+          kind: 'place',
+          placeId: pending.placeId,
+        });
         interaction.setHoveredPlaceId(pending.placeId);
         setOperationMessage('Place move committed to local persistence.');
         return;
@@ -131,7 +140,7 @@ export const createDrawingOps = ({
           y: deletedPlace?.y ?? null,
         });
         interaction.rejectPending();
-        interaction.setSelectedPlaceId(null);
+        interaction.setSelectionTarget({ kind: 'canvas' });
         interaction.setHoveredPlaceId(null);
         setOperationMessage('Place deletion committed to local persistence.');
       }
