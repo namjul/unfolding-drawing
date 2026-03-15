@@ -1,9 +1,9 @@
 import { createEffect, createMemo, createSignal } from 'solid-js';
-import PlaceCanvas from './canvas/PlaceCanvas';
+import Canvas from './canvas/PlaceCanvas';
 import { createViewportToFit } from './canvas/viewport';
 import { createDrawingOps } from './drawing-ops';
 import { useDrawingState } from './drawing-state';
-import PlaceInspector from './inspector/PlaceInspector';
+import DrawingGuideProps from './inspector/PlaceInspector';
 import { createInteractionState } from './interaction-state';
 import type { PlaceId } from './lib/evolu-db';
 
@@ -89,9 +89,9 @@ const App = () => {
   });
 
   return (
-    <main class="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.18),_transparent_32%),linear-gradient(180deg,_#111827_0%,_#020617_56%,_#0f172a_100%)] px-4 py-4 text-stone-100 md:px-6">
-      <div class="mx-auto grid min-h-[calc(100vh-2rem)] max-w-7xl grid-cols-1 gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
-        <PlaceInspector
+    <main class="flex gap-2 h-screen p-2 *:min-w-0">
+      <section class="p-2 basis-1/5 shrink-0 max-w-80 bg-white flex flex-col overflow-auto">
+        <DrawingGuideProps
           activePlace={selectedPlace}
           canStageDelete={canStageDelete}
           onCommitPendingChange={drawingOps.commitPending}
@@ -106,8 +106,9 @@ const App = () => {
           transformations={drawing.transformations}
           viewport={interaction.viewport}
         />
-
-        <PlaceCanvas
+      </section>
+      <section class="basis-1/5 grow min-h-0 flex flex-col ">
+        <Canvas
           hoveredPlaceId={interaction.hoveredPlaceId}
           onSelectPlace={interaction.setSelectedPlaceId}
           onStageAddPlace={interaction.stageAddPlace}
@@ -122,9 +123,50 @@ const App = () => {
           tool={interaction.tool}
           viewport={interaction.viewport}
         />
-      </div>
+      </section>
+      <section class="p-2 basis-1/5 shrink-0 max-w-80 bg-white flex flex-col min-h-0">
+        <p class="text-xs uppercase tracking-[0.3em]">Drawing DNA</p>
+      </section>
     </main>
   );
+
+  // return (
+  //   <main class="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(251,191,36,0.18),_transparent_32%),linear-gradient(180deg,_#111827_0%,_#020617_56%,_#0f172a_100%)] px-4 py-4 text-stone-100 md:px-6">
+  //     <div class="mx-auto grid min-h-[calc(100vh-2rem)] max-w-7xl grid-cols-1 gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
+  //       <PlaceInspector
+  //         activePlace={selectedPlace}
+  //         canStageDelete={canStageDelete}
+  //         onCommitPendingChange={drawingOps.commitPending}
+  //         onEnterAddPlaceMode={interaction.enterAddPlaceMode}
+  //         onRejectPendingChange={interaction.rejectPending}
+  //         onResetViewport={resetViewport}
+  //         onStageDelete={handleStageDelete}
+  //         operationMessage={drawingOps.operationMessage}
+  //         pendingTransformation={interaction.pendingTransformation}
+  //         selectedPlaceId={interaction.selectedPlaceId}
+  //         tool={interaction.tool}
+  //         transformations={drawing.transformations}
+  //         viewport={interaction.viewport}
+  //       />
+  //
+  //       <PlaceCanvas
+  //         hoveredPlaceId={interaction.hoveredPlaceId}
+  //         onSelectPlace={interaction.setSelectedPlaceId}
+  //         onStageAddPlace={interaction.stageAddPlace}
+  //         onStageMovePlace={interaction.stageMovePlace}
+  //         onSurfaceSizeChange={setSurfaceSize}
+  //         onUpdateHoverPlace={interaction.setHoveredPlaceId}
+  //         onUpdateMovePlace={interaction.updatePendingMove}
+  //         pendingTransformation={interaction.pendingTransformation}
+  //         places={displayPlaces}
+  //         selectedPlaceId={interaction.selectedPlaceId}
+  //         setViewport={interaction.setViewport}
+  //         tool={interaction.tool}
+  //         viewport={interaction.viewport}
+  //       />
+  //     </div>
+  //   </main>
+  // );
 };
 
 export default App;

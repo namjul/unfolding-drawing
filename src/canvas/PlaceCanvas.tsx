@@ -55,7 +55,7 @@ interface PlaceCanvasProps {
   viewport: Accessor<Viewport>;
 }
 
-const backgroundColor: number[] = [4 / 255, 11 / 255, 23 / 255, 1];
+const backgroundColor: number[] = [1, 1, 1, 1];
 const wheelScaleFactor = 1.0015;
 const dragThreshold = 4;
 
@@ -184,42 +184,42 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
     };
   };
 
-  const drawGrid = (
-    canvas: Canvas,
-    canvasKit: CanvasKit,
-    viewport: Viewport,
-    size: { width: number; height: number },
-  ) => {
-    const gridSpacing = 120;
-    const worldMin = screenToWorld(viewport, 0, 0);
-    const worldMax = screenToWorld(viewport, size.width, size.height);
-    const startX = Math.floor(worldMin.x / gridSpacing) * gridSpacing;
-    const startY = Math.floor(worldMin.y / gridSpacing) * gridSpacing;
-    const endX = Math.ceil(worldMax.x / gridSpacing) * gridSpacing;
-    const endY = Math.ceil(worldMax.y / gridSpacing) * gridSpacing;
-
-    runtime?.paints.canvasGrid.setStrokeWidth(1 / viewport.scale);
-
-    for (let x = startX; x <= endX; x += gridSpacing) {
-      canvas.drawLine(
-        x,
-        worldMin.y,
-        x,
-        worldMax.y,
-        runtime?.paints.canvasGrid ?? new canvasKit.Paint(),
-      );
-    }
-
-    for (let y = startY; y <= endY; y += gridSpacing) {
-      canvas.drawLine(
-        worldMin.x,
-        y,
-        worldMax.x,
-        y,
-        runtime?.paints.canvasGrid ?? new canvasKit.Paint(),
-      );
-    }
-  };
+  // const drawGrid = (
+  //   canvas: Canvas,
+  //   canvasKit: CanvasKit,
+  //   viewport: Viewport,
+  //   size: { width: number; height: number },
+  // ) => {
+  //   const gridSpacing = 120;
+  //   const worldMin = screenToWorld(viewport, 0, 0);
+  //   const worldMax = screenToWorld(viewport, size.width, size.height);
+  //   const startX = Math.floor(worldMin.x / gridSpacing) * gridSpacing;
+  //   const startY = Math.floor(worldMin.y / gridSpacing) * gridSpacing;
+  //   const endX = Math.ceil(worldMax.x / gridSpacing) * gridSpacing;
+  //   const endY = Math.ceil(worldMax.y / gridSpacing) * gridSpacing;
+  //
+  //   runtime?.paints.canvasGrid.setStrokeWidth(1 / viewport.scale);
+  //
+  //   for (let x = startX; x <= endX; x += gridSpacing) {
+  //     canvas.drawLine(
+  //       x,
+  //       worldMin.y,
+  //       x,
+  //       worldMax.y,
+  //       runtime?.paints.canvasGrid ?? new canvasKit.Paint(),
+  //     );
+  //   }
+  //
+  //   for (let y = startY; y <= endY; y += gridSpacing) {
+  //     canvas.drawLine(
+  //       worldMin.x,
+  //       y,
+  //       worldMax.x,
+  //       y,
+  //       runtime?.paints.canvasGrid ?? new canvasKit.Paint(),
+  //     );
+  //   }
+  // };
 
   const drawScene = (canvas: Canvas) => {
     if (!runtime) {
@@ -229,13 +229,13 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
     const currentViewport = props.viewport();
     const selectedPlaceId = props.selectedPlaceId();
     const hoveredPlaceId = props.hoveredPlaceId();
-    const currentSize = canvasSize();
+    // const currentSize = canvasSize();
 
     canvas.clear(backgroundColor);
     canvas.save();
     canvas.translate(currentViewport.x, currentViewport.y);
     canvas.scale(currentViewport.scale, currentViewport.scale);
-    drawGrid(canvas, runtime.canvasKit, currentViewport, currentSize);
+    // drawGrid(canvas, runtime.canvasKit, currentViewport, currentSize);
 
     for (const place of props.places()) {
       const fillPaint = place.isMarkedForDeletion
@@ -279,12 +279,12 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
       canvasKit.MakeSWCanvasSurface(canvasElement);
 
     if (!surface) {
-      setStatus('CanvasKit surface creation failed.');
+      setStatus('Canvas surface creation failed.');
       return;
     }
 
     runtime = { canvasKit, paints: createPaints(canvasKit), surface };
-    setStatus('CanvasKit ready. Place editing is active.');
+    setStatus('Canvas ready.');
     queueDraw();
   };
 
@@ -551,9 +551,8 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
   });
 
   return (
-    <section class="relative overflow-hidden rounded-[32px] border border-sky-500/20 bg-[#040b17] shadow-[0_32px_100px_rgba(15,23,42,0.7)]">
-      <div class="absolute inset-x-0 top-0 z-20 flex items-center justify-between border-b border-white/8 bg-slate-950/75 px-4 py-3 text-xs uppercase tracking-[0.24em] text-slate-300 backdrop-blur">
-        <span>CanvasKit place surface</span>
+    <section class="relative flex-1 min-h-0 w-full bg-white overflow-hidden">
+      <div class="absolute inset-x-0 top-0 z-20 flex items-center justify-between p-2 text-xs uppercase tracking-[0.3em]">
         <span>{status()}</span>
       </div>
 

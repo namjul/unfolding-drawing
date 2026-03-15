@@ -1,4 +1,4 @@
-import { type Accessor, For, Show } from 'solid-js';
+import { type Accessor, For, type ParentComponent, Show } from 'solid-js';
 import type { Viewport } from '../canvas/viewport';
 import type {
   DisplayPlace,
@@ -7,7 +7,7 @@ import type {
   TransformationEntry,
 } from '../drawing/types';
 
-interface PlaceInspectorProps {
+interface DrawingGuideProps {
   activePlace: Accessor<DisplayPlace | null>;
   canStageDelete: Accessor<boolean>;
   onCommitPendingChange: () => void;
@@ -38,149 +38,142 @@ const describePendingTransformation = (
   }
 };
 
-const PlaceInspector = (props: PlaceInspectorProps) => {
+const Button: ParentComponent<{ disabled?: boolean; onClick?: () => void }> = (
+  props,
+) => {
   return (
-    <section class="rounded-[28px] border border-stone-800/80 bg-stone-950/75 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur">
-      <div class="space-y-4">
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-amber-300/70">
-            Milestone 1
-          </p>
-          <h1 class="mt-2 font-serif text-3xl text-stone-50">
-            Persistent Place Core
-          </h1>
-          <p class="mt-3 text-sm leading-6 text-stone-300">
-            Evolu-backed places with staged add, move, delete, commit, reject,
-            and committed transformation history.
-          </p>
-        </div>
-
-        <div class="rounded-2xl border border-stone-800 bg-stone-900/70 p-4 text-sm text-stone-300">
-          <p class="text-xs uppercase tracking-[0.24em] text-stone-500">Tool</p>
-          <p class="mt-3">
-            Current tool: {props.tool() === 'addPlace' ? 'Add place' : 'Select'}
-          </p>
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              class="rounded-full bg-amber-300 px-4 py-2 text-sm font-medium text-stone-950 transition hover:bg-amber-200"
-              onClick={props.onEnterAddPlaceMode}
-            >
-              Stage place from canvas click
-            </button>
-            <button
-              type="button"
-              class="rounded-full border border-stone-700 px-4 py-2 text-sm text-stone-200 transition hover:border-stone-500 hover:text-stone-50"
-              onClick={props.onResetViewport}
-            >
-              Reset view
-            </button>
-          </div>
-        </div>
-
-        <div class="rounded-2xl border border-stone-800 bg-stone-900/60 p-4 text-sm text-stone-300">
-          <p class="text-xs uppercase tracking-[0.24em] text-stone-500">
-            Pending change
-          </p>
-          <p class="mt-3 leading-6">
-            {describePendingTransformation(props.pendingTransformation())}
-          </p>
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              class="rounded-full bg-sky-300 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={props.pendingTransformation().kind === 'none'}
-              onClick={props.onCommitPendingChange}
-            >
-              Commit change
-            </button>
-            <button
-              type="button"
-              class="rounded-full border border-stone-700 px-4 py-2 text-sm text-stone-200 transition hover:border-stone-500 hover:text-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={props.pendingTransformation().kind === 'none'}
-              onClick={props.onRejectPendingChange}
-            >
-              Reject change
-            </button>
-          </div>
-          <Show when={props.operationMessage()}>
-            {(message) => (
-              <p class="mt-3 text-xs text-amber-200">{message()}</p>
-            )}
-          </Show>
-        </div>
-
-        <div class="rounded-2xl border border-stone-800 bg-stone-900/60 p-4 text-sm text-stone-300">
-          <p class="text-xs uppercase tracking-[0.24em] text-stone-500">
-            Selection
-          </p>
-          <Show
-            when={props.activePlace()}
-            fallback={
-              <p class="mt-3 text-stone-400">Select a place to inspect it.</p>
-            }
-          >
-            {(place) => (
-              <div class="mt-3 space-y-2">
-                <p class="text-lg text-stone-50">
-                  {place().name ?? place().id}
-                </p>
-                <p>x: {Math.round(place().x)}</p>
-                <p>y: {Math.round(place().y)}</p>
-                <p>{place().isDraft ? 'Draft place' : 'Persisted place'}</p>
-                <Show when={place().isMarkedForDeletion}>
-                  <p class="text-rose-300">Marked for deletion</p>
-                </Show>
-                <button
-                  type="button"
-                  class="mt-2 rounded-full border border-rose-500/50 px-4 py-2 text-sm text-rose-200 transition hover:border-rose-400 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={!props.canStageDelete()}
-                  onClick={props.onStageDelete}
-                >
-                  {place().isDraft ? 'Reject draft place' : 'Stage delete'}
-                </button>
-              </div>
-            )}
-          </Show>
-        </div>
-
-        <div class="rounded-2xl border border-stone-800 bg-stone-900/60 p-4 text-sm text-stone-300">
-          <p class="text-xs uppercase tracking-[0.24em] text-stone-500">
-            Viewport
-          </p>
-          <p class="mt-3">Scale: {props.viewport().scale.toFixed(3)}x</p>
-          <p class="mt-1">
-            Offset: {Math.round(props.viewport().x)},{' '}
-            {Math.round(props.viewport().y)}
-          </p>
-          <p class="mt-1">Selected: {props.selectedPlaceId() ?? 'none'}</p>
-        </div>
-
-        <div class="rounded-2xl border border-stone-800 bg-stone-900/60 p-4 text-sm text-stone-300">
-          <p class="text-xs uppercase tracking-[0.24em] text-stone-500">
-            History
-          </p>
-          <div class="mt-3 space-y-2">
-            <For each={[...props.transformations()].reverse().slice(0, 8)}>
-              {(transformation) => (
-                <div class="rounded-xl border border-stone-800 bg-stone-950/70 p-3">
-                  <p class="text-sm text-stone-100">
-                    #{transformation.sequence} {transformation.kind}
-                  </p>
-                  <p class="mt-1 text-xs text-stone-400">
-                    {new Date(transformation.timestamp).toLocaleString()}
-                  </p>
-                </div>
-              )}
-            </For>
-            <Show when={props.transformations().length === 0}>
-              <p class="text-stone-400">No committed transformations yet.</p>
-            </Show>
-          </div>
-        </div>
-      </div>
-    </section>
+    <button
+      type="button"
+      onClick={props.onClick}
+      disabled={props.disabled}
+      title="Reset drawing and start over (TBD)"
+      class="px-3 py-1 bg-amber-200 rounded text-sm text-slate-900  disabled:cursor-not-allowed disabled:opacity-40 disabled:pointer-events-none "
+    >
+      {props.children}
+    </button>
   );
 };
 
-export default PlaceInspector;
+const Panel: ParentComponent<{ title: string }> = (props) => {
+  return (
+    <div class="border border-sky-200 rounded overflow-hidden">
+      <div class="px-2 py-1.5 bg-sky-200 font-medium text-sm text-slate-700">
+        {props.title}
+      </div>
+      <div class="border-t border-sky-200 px-2 py-2 bg-white">
+        {props.children}
+      </div>
+    </div>
+  );
+};
+
+const DrawingGuideProps = (props: DrawingGuideProps) => {
+  return (
+    <div class="space-y-4">
+      <p class="text-xs uppercase tracking-[0.3em]">Grawing Guide</p>
+
+      <Panel title="Observation">
+        <div class="flex flex-col gap-2">
+          <Button disabled={true}>Reset Drawing</Button>
+          <Button onClick={props.onResetViewport}>Reset view</Button>
+        </div>
+        <p class="text-sm text-slate-600 mt-2">
+          Look at the drawing. What would you like to do?
+        </p>
+      </Panel>
+
+      <Panel title="Tool">
+        <p class="mt-3">
+          Current tool: {props.tool() === 'addPlace' ? 'Add place' : 'Select'}
+        </p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <Button onClick={props.onEnterAddPlaceMode}>
+            Stage place from canvas click
+          </Button>
+        </div>
+      </Panel>
+
+      <Panel title="Pending change">
+        <p class="mt-3 leading-6">
+          {describePendingTransformation(props.pendingTransformation())}
+        </p>
+        <div class="mt-3 flex flex-col gap-2">
+          <Button
+            disabled={props.pendingTransformation().kind === 'none'}
+            onClick={props.onCommitPendingChange}
+          >
+            Commit change
+          </Button>
+          <Button
+            disabled={props.pendingTransformation().kind === 'none'}
+            onClick={props.onRejectPendingChange}
+          >
+            Reject change
+          </Button>
+        </div>
+
+        <Show when={props.operationMessage()}>
+          {(message) => <p class="mt-3 text-xs text-amber-900">{message()}</p>}
+        </Show>
+      </Panel>
+
+      <Panel title="Selection">
+        <Show
+          when={props.activePlace()}
+          fallback={
+            <p class="mt-3 text-stone-400">Select a place to inspect it.</p>
+          }
+        >
+          {(place) => (
+            <div class="mt-3 space-y-2">
+              <p>Id: {place().name ?? place().id}</p>
+              <p>x: {Math.round(place().x)}</p>
+              <p>y: {Math.round(place().y)}</p>
+              <p>{place().isDraft ? 'Draft place' : 'Persisted place'}</p>
+              <Show when={place().isMarkedForDeletion}>
+                <p class="text-rose-300">Marked for deletion</p>
+              </Show>
+              <Button
+                disabled={!props.canStageDelete()}
+                onClick={props.onStageDelete}
+              >
+                {place().isDraft ? 'Reject draft place' : 'Stage delete'}
+              </Button>
+            </div>
+          )}
+        </Show>
+      </Panel>
+
+      <Panel title="Viewport">
+        <p class="mt-3">Scale: {props.viewport().scale.toFixed(3)}x</p>
+        <p class="mt-1">
+          Offset: {Math.round(props.viewport().x)},{' '}
+          {Math.round(props.viewport().y)}
+        </p>
+        <p class="mt-1">Selected: {props.selectedPlaceId() ?? 'none'}</p>
+      </Panel>
+
+      <Panel title="History">
+        <div class="space-y-2">
+          <For each={[...props.transformations()].reverse().slice(0, 8)}>
+            {(transformation) => (
+              <div class="bg-stone-200/70 p-3">
+                <p class="text-sm text-stone-500">
+                  #{transformation.sequence} {transformation.kind}
+                </p>
+                <p class="mt-1 text-xs text-stone-400">
+                  {new Date(transformation.timestamp).toLocaleString()}
+                </p>
+              </div>
+            )}
+          </For>
+        </div>
+        <Show when={props.transformations().length === 0}>
+          <p class="text-stone-400">No committed transformations yet.</p>
+        </Show>
+      </Panel>
+    </div>
+  );
+};
+
+export default DrawingGuideProps;
