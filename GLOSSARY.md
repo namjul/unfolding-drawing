@@ -759,6 +759,11 @@ A Unidirectional axis extends from a place in one direction only.
 ### Bidirectional Axis
 A bidirectional axis extends from a place in both directions.
 
+### Mirror Axis
+Mirroring can be enabled for an axis.
+When mirroring is enabled for an axis, drawing objects created on one side of the axis are echoed on the other side of the axis.
+Miroring does not apply to places that are positioned on the mirror axis itself.  
+
 ### Handle
 Handles are visual queues to assist the user in understanding where in the drawing they can interact in order to make a desired change. 
 They should appear when a drawing object and a transformation have been selected and should let the user know “where to grip” the selected drawing objects in order to make the desired transformation. 

@@ -115,6 +115,8 @@ export const Schema = {
     placeId: PlaceId,
     angle: FiniteNumber,
     isBidirectional: nullOr(FiniteNumber),
+    /** When 1, axis acts as mirror: changes on one side reflect to the other. */
+    isMirror: nullOr(FiniteNumber),
     circularRepeaterId: nullOr(CircularRepeaterId),
   },
   circularRepeater: {
@@ -170,6 +172,7 @@ export const Schema = {
     radius: nullOr(FiniteNumber),
     angleOnCircle: nullOr(FiniteNumber),
     axisIsBidirectional: nullOr(FiniteNumber),
+    axisIsMirror: nullOr(FiniteNumber),
     circularRepeaterId: nullOr(CircularRepeaterId),
     alternatingShow: nullOr(FiniteNumber),
     alternatingSkip: nullOr(FiniteNumber),

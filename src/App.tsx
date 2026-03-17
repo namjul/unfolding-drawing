@@ -475,6 +475,7 @@ const App: Component = () => {
     placeId: PlaceId;
     angle: number;
     isBidirectional: boolean;
+    isMirror: boolean;
     /** When adding axis at each echo place, commit inserts N axes. */
     echoPlaceIds?: PlaceId[];
   } | null>(null);
@@ -483,12 +484,14 @@ const App: Component = () => {
     placeId: PlaceId;
     angle: number;
     isBidirectional: boolean;
+    isMirror: boolean;
   } | null>(null);
   const [pendingDeleteAxisId, setPendingDeleteAxisId] =
     createSignal<AxisId | null>(null);
   const [pendingAddPlaceOnAxis, setPendingAddPlaceOnAxis] = createSignal<{
     axisId: AxisId;
     distanceAlongAxis: number;
+    distanceFromAxis?: number;
   } | null>(null);
   const [draggingAxisAngle, setDraggingAxisAngle] = createSignal(false);
   const [draggingPlaceOnAxis, setDraggingPlaceOnAxis] =
@@ -888,6 +891,17 @@ const App: Component = () => {
       along = dx * c + dy * s;
       perp = -dx * s + dy * c;
     }
+    const axis =
+      movedPlace.parentAxisId != null
+        ? axes().find((a) => a.id === movedPlace.parentAxisId)
+        : null;
+    const allSameAxis = groupPlaces.every(
+      (p) => (p as PlaceLike).parentAxisId === movedPlace.parentAxisId,
+    );
+    const isMirrorSameAxis =
+      axis != null &&
+      (axis as { isMirror?: number | null }).isMirror === 1 &&
+      allSameAxis;
     const overrides: Array<{ placeId: PlaceId; x: number; y: number }> = [];
     for (const place of groupPlaces) {
       const committed = getAbsolutePosition(
@@ -902,8 +916,10 @@ const App: Component = () => {
       if (placeAxisAngle != null) {
         const c = Math.cos(placeAxisAngle);
         const s = Math.sin(placeAxisAngle);
-        worldDx = along * c - perp * s;
-        worldDy = along * s + perp * c;
+        const pPerp =
+          isMirrorSameAxis && place.id !== pm.placeId ? -perp : perp;
+        worldDx = along * c - pPerp * s;
+        worldDy = along * s + pPerp * c;
       }
       overrides.push({
         placeId: place.id,
@@ -1551,6 +1567,8 @@ const App: Component = () => {
             const perp =
               (pm.x - (parentAbs.x + d * cosA)) * -sinA +
               (pm.y - (parentAbs.y + d * sinA)) * cosA;
+            const isMirrorSameAxis =
+              (axis as { isMirror?: number | null }).isMirror === 1;
             for (let i = 0; i < result.length; i++) {
               const p = result[i];
               if ((p as PlaceLike).repeaterEchoGroupId !== groupId) continue;
@@ -1565,10 +1583,16 @@ const App: Component = () => {
               const pWorldAngle = pParentAbs.worldAngle + Number(pAxis.angle);
               const pCos = Math.cos(pWorldAngle);
               const pSin = Math.sin(pWorldAngle);
+              const pPerp =
+                isMirrorSameAxis && pAxisId === movedPlace.parentAxisId
+                  ? (p as { id: PlaceId }).id === movedPlace.id
+                    ? perp
+                    : -perp
+                  : perp;
               result[i] = {
                 ...p,
-                absX: pParentAbs.x + d * pCos + perp * -pSin,
-                absY: pParentAbs.y + d * pSin + perp * pCos,
+                absX: pParentAbs.x + d * pCos + pPerp * -pSin,
+                absY: pParentAbs.y + d * pSin + pPerp * pCos,
                 absWorldAngle: pWorldAngle,
               } as (typeof result)[number];
             }
@@ -1640,10 +1664,12 @@ const App: Component = () => {
             angleOverride,
           );
           const worldAngle = parentAbs.worldAngle + Number(axis.angle);
-          const px =
-            parentAbs.x + paPlace.distanceAlongAxis * Math.cos(worldAngle);
-          const py =
-            parentAbs.y + paPlace.distanceAlongAxis * Math.sin(worldAngle);
+          const d = paPlace.distanceAlongAxis;
+          const perp = paPlace.distanceFromAxis ?? 0;
+          const cosA = Math.cos(worldAngle);
+          const sinA = Math.sin(worldAngle);
+          const px = parentAbs.x + d * cosA + perp * -sinA;
+          const py = parentAbs.y + d * sinA + perp * cosA;
           const previewPx = pm?.placeId === PENDING_AXIS_PLACE ? pm.x : px;
           const previewPy = pm?.placeId === PENDING_AXIS_PLACE ? pm.y : py;
           result.push({
@@ -2315,12 +2341,15 @@ const App: Component = () => {
     if (
       gs === 'execute' &&
       tc === 'modifyPlaceOnCircularRepeater' &&
-      paModRep &&
       hit
     ) {
-      const modPlace = places().find((p) => p.id === paModRep.placeId) as
-        | PlaceLike
-        | undefined;
+      const modPlace = paModRep
+        ? (places().find((p) => p.id === paModRep.placeId) as
+            | PlaceLike
+            | undefined)
+        : (places().find((p) => p.id === selectedPlaceId()) as
+            | PlaceLike
+            | undefined);
       const groupId = modPlace?.repeaterEchoGroupId;
       if (
         groupId != null &&
@@ -2368,7 +2397,7 @@ const App: Component = () => {
       setDraggingPlaceOnAxis(paPlace.axisId);
       return;
     }
-    // When adding a place on axis, clicking on the axis line (not just the preview) places and starts drag.
+    // When adding a place on axis, clicking on the axis line (or anywhere if mirror) places and starts drag.
     if (gs === 'execute' && tc === 'addPlaceOnAxis' && paPlace) {
       const axis = axes().find((a) => a.id === paPlace.axisId);
       if (axis) {
@@ -2389,7 +2418,22 @@ const App: Component = () => {
           if (axis.isBidirectional === 0) d = Math.max(0, d);
           const projX = geom.originX + d * Math.cos(geom.worldAngle);
           const projY = geom.originY + d * Math.sin(geom.worldAngle);
-          const perpDist = Math.hypot(cx - projX, cy - projY);
+          let perp =
+            (cy - projY) * Math.cos(geom.worldAngle) -
+            (cx - projX) * Math.sin(geom.worldAngle);
+          const perpDist = Math.abs(perp);
+          const isMirror =
+            (axis as { isMirror?: number | null }).isMirror === 1;
+          if (isMirror) {
+            if (perpDist <= AXIS_MAGNETIC_THRESHOLD) perp = 0;
+            setPendingAddPlaceOnAxis({
+              axisId: paPlace.axisId,
+              distanceAlongAxis: d,
+              distanceFromAxis: perp,
+            });
+            setDraggingPlaceOnAxis(paPlace.axisId);
+            return;
+          }
           if (perpDist <= AXIS_HIT_THRESHOLD) {
             setPendingAddPlaceOnAxis({
               axisId: paPlace.axisId,
@@ -3044,10 +3088,26 @@ const App: Component = () => {
             geom.worldAngle,
           );
           if (axis.isBidirectional === 0) d = Math.max(0, d);
-          setPendingAddPlaceOnAxis({
-            axisId: dragPlaceOnAxis,
-            distanceAlongAxis: d,
-          });
+          const isMirror =
+            (axis as { isMirror?: number | null }).isMirror === 1;
+          if (isMirror) {
+            const projX = geom.originX + d * Math.cos(geom.worldAngle);
+            const projY = geom.originY + d * Math.sin(geom.worldAngle);
+            let perp =
+              (cy - projY) * Math.cos(geom.worldAngle) -
+              (cx - projX) * Math.sin(geom.worldAngle);
+            if (Math.abs(perp) <= AXIS_MAGNETIC_THRESHOLD) perp = 0;
+            setPendingAddPlaceOnAxis({
+              axisId: dragPlaceOnAxis,
+              distanceAlongAxis: d,
+              distanceFromAxis: perp,
+            });
+          } else {
+            setPendingAddPlaceOnAxis({
+              axisId: dragPlaceOnAxis,
+              distanceAlongAxis: d,
+            });
+          }
         }
       }
     }
@@ -3130,6 +3190,7 @@ const App: Component = () => {
                 placeId: addAx.placeId,
                 angle: axisAngle,
                 isBidirectional: addAx.isBidirectional,
+                isMirror: addAx.isMirror,
                 ...(addAx.echoPlaceIds != null && {
                   echoPlaceIds: addAx.echoPlaceIds,
                 }),
@@ -3140,6 +3201,7 @@ const App: Component = () => {
                 placeId: modAx.placeId,
                 angle: axisAngle,
                 isBidirectional: modAx.isBidirectional,
+                isMirror: modAx.isMirror,
               });
             }
           }
@@ -3580,10 +3642,16 @@ const App: Component = () => {
             placeId: echoPlaceIds[0] ?? placeId,
             angle: 0,
             isBidirectional: true,
+            isMirror: false,
             echoPlaceIds,
           });
         } else {
-          setPendingAddAxis({ placeId, angle: 0, isBidirectional: true });
+          setPendingAddAxis({
+            placeId,
+            angle: 0,
+            isBidirectional: true,
+            isMirror: false,
+          });
         }
       }
     }
@@ -3592,11 +3660,13 @@ const App: Component = () => {
       if (axisId) {
         const axis = axes().find((a) => a.id === axisId);
         if (axis) {
+          const ax = axis as { isMirror?: number | null };
           setPendingModifyAxis({
             axisId,
             placeId: axis.placeId,
             angle: Number(axis.angle),
             isBidirectional: axis.isBidirectional !== 0,
+            isMirror: ax.isMirror === 1,
           });
         }
       }
@@ -4109,36 +4179,29 @@ const App: Component = () => {
                       alternatingSkip: null,
                       alternatingStart: null,
                     };
-              for (const p of toUpdate) {
-                if (p && (p as PlaceLike).parentAxisId != null) {
-                  evolu.update('place', {
-                    id: p.id,
-                    distanceAlongAxis: d,
-                    distanceFromAxis: perp,
-                    ...(paModRep && movePatternFields),
-                  });
-                }
-              }
-              if (repId != null && groupId != null) {
-                recordTransformation({
-                  kind: 'modifyPlaceOnCircularRepeater',
-                  placeId,
-                  circularRepeaterId: repId,
+              const isMirrorAxis =
+                repId == null &&
+                (axis as { isMirror?: number | null }).isMirror === 1;
+              const mirrorSameAxis =
+                isMirrorAxis && toUpdate.length >= 2;
+
+              if (
+                isMirrorAxis &&
+                perp === 0 &&
+                toUpdate.length >= 2
+              ) {
+                evolu.update('place', {
+                  id: placeId,
                   distanceAlongAxis: d,
-                  distanceFromAxis: perp,
-                  ...(paModRep?.patternEnabled === true
-                    ? {
-                        alternatingShow:
-                          paModRep?.alternatingShow ?? placeRow.alternatingShow ?? 1,
-                        alternatingSkip:
-                          paModRep?.alternatingSkip ?? placeRow.alternatingSkip ?? 1,
-                        alternatingStart:
-                          paModRep?.alternatingStart ?? placeRow.alternatingStart ?? 1,
-                      }
-                    : {}),
+                  distanceFromAxis: null,
+                  repeaterEchoGroupId: null,
                 });
-                setPendingModifyPlaceOnCircularRepeater(null);
-              } else {
+                for (const p of toUpdate) {
+                  if (p && p.id !== placeId) {
+                    evolu.update('place', { id: p.id, isDeleted: true });
+                    recordTransformation({ kind: 'delete', placeId: p.id });
+                  }
+                }
                 recordTransformation({
                   kind: 'move',
                   placeId,
@@ -4146,6 +4209,85 @@ const App: Component = () => {
                   x: move.x,
                   y: move.y,
                 });
+              } else if (
+                isMirrorAxis &&
+                perp !== 0 &&
+                toUpdate.length === 1
+              ) {
+                evolu.update('place', {
+                  id: placeId,
+                  distanceAlongAxis: d,
+                  distanceFromAxis: perp,
+                  repeaterEchoGroupId: placeId,
+                });
+                const placeName = (place as { name?: string | null }).name ?? null;
+                const echoName = nextPlaceName([
+                  ...placesList,
+                  { name: placeName },
+                ]);
+                const echoNameResult = String1000.from(echoName);
+                evolu.insert('place', {
+                  parentId: null,
+                  parentAxisId: placeOnAxis,
+                  distanceAlongAxis: d,
+                  distanceFromAxis: -perp,
+                  x: 0,
+                  y: 0,
+                  ...(echoNameResult.ok && { name: echoNameResult.value }),
+                  isScaffolding: 1,
+                  repeaterEchoGroupId: placeId,
+                });
+                recordTransformation({
+                  kind: 'move',
+                  placeId,
+                  parentId: null,
+                  x: move.x,
+                  y: move.y,
+                });
+              } else {
+                for (const p of toUpdate) {
+                  if (p && (p as PlaceLike).parentAxisId != null) {
+                    const pPerp = mirrorSameAxis
+                      ? p.id === placeId
+                        ? perp
+                        : -perp
+                      : perp;
+                    evolu.update('place', {
+                      id: p.id,
+                      distanceAlongAxis: d,
+                      distanceFromAxis: pPerp,
+                      ...(paModRep && repId != null && movePatternFields),
+                    });
+                  }
+                }
+                if (repId != null && groupId != null) {
+                  recordTransformation({
+                    kind: 'modifyPlaceOnCircularRepeater',
+                    placeId,
+                    circularRepeaterId: repId,
+                    distanceAlongAxis: d,
+                    distanceFromAxis: perp,
+                    ...(paModRep?.patternEnabled === true
+                      ? {
+                          alternatingShow:
+                            paModRep?.alternatingShow ?? placeRow.alternatingShow ?? 1,
+                          alternatingSkip:
+                            paModRep?.alternatingSkip ?? placeRow.alternatingSkip ?? 1,
+                          alternatingStart:
+                            paModRep?.alternatingStart ?? placeRow.alternatingStart ?? 1,
+                        }
+                      : {}),
+                  });
+                  setPendingModifyPlaceOnCircularRepeater(null);
+                } else {
+                  recordTransformation({
+                    kind: 'move',
+                    placeId,
+                    parentId: null,
+                    x: move.x,
+                    y: move.y,
+                  });
+                }
               }
           }
         } else {
@@ -4356,6 +4498,7 @@ const App: Component = () => {
           placeId: pid,
           angle: addAx.angle,
           isBidirectional: addAx.isBidirectional ? 1 : 0,
+          isMirror: addAx.isMirror ? 1 : 0,
         });
         if (axisRes.ok) {
           recordTransformation({
@@ -4364,6 +4507,7 @@ const App: Component = () => {
             axisId: axisRes.value.id,
             angle: addAx.angle,
             isBidirectional: addAx.isBidirectional ? 1 : 0,
+            isMirror: addAx.isMirror ? 1 : 0,
           });
         }
       }
@@ -4376,6 +4520,7 @@ const App: Component = () => {
         id: modAx.axisId,
         angle: modAx.angle,
         isBidirectional: modAx.isBidirectional ? 1 : 0,
+        isMirror: modAx.isMirror ? 1 : 0,
       });
       recordTransformation({
         kind: 'modifyAxis',
@@ -4383,6 +4528,7 @@ const App: Component = () => {
         axisId: modAx.axisId,
         angle: modAx.angle,
         isBidirectional: modAx.isBidirectional ? 1 : 0,
+        isMirror: modAx.isMirror ? 1 : 0,
       });
       setPendingModifyAxis(null);
     }
@@ -4403,23 +4549,59 @@ const App: Component = () => {
 
     const addPlaceOnAx = pendingAddPlaceOnAxis();
     if (addPlaceOnAx) {
+      const axis = axes().find((a) => a.id === addPlaceOnAx.axisId);
+      const isMirror =
+        (axis as { isMirror?: number | null } | undefined)?.isMirror === 1;
+      const offAxis =
+        addPlaceOnAx.distanceFromAxis != null &&
+        addPlaceOnAx.distanceFromAxis !== 0;
       const defaultName = nextPlaceName(placesList);
       const nameResult = String1000.from(defaultName);
+      const distanceFromAxis = addPlaceOnAx.distanceFromAxis ?? 0;
       const placeRes = evolu.insert('place', {
         parentId: null,
         parentAxisId: addPlaceOnAx.axisId,
         distanceAlongAxis: addPlaceOnAx.distanceAlongAxis,
+        distanceFromAxis: distanceFromAxis !== 0 ? distanceFromAxis : null,
         x: 0,
         y: 0,
         ...(nameResult.ok && { name: nameResult.value }),
         isScaffolding: 1,
       });
       if (placeRes.ok) {
+        if (isMirror && offAxis) {
+          evolu.update('place', {
+            id: placeRes.value.id,
+            repeaterEchoGroupId: placeRes.value.id,
+          });
+          const echoDistanceFromAxis = -(addPlaceOnAx.distanceFromAxis ?? 0);
+          const echoName = nextPlaceName([
+            ...placesList,
+            { name: nameResult.ok ? nameResult.value : defaultName },
+          ]);
+          const echoNameResult = String1000.from(echoName);
+          evolu.insert('place', {
+            parentId: null,
+            parentAxisId: addPlaceOnAx.axisId,
+            distanceAlongAxis: addPlaceOnAx.distanceAlongAxis,
+            distanceFromAxis:
+              echoDistanceFromAxis !== 0 ? echoDistanceFromAxis : null,
+            x: 0,
+            y: 0,
+            ...(echoNameResult.ok && { name: echoNameResult.value }),
+            isScaffolding: 1,
+            repeaterEchoGroupId: placeRes.value.id,
+          });
+        }
         recordTransformation({
           kind: 'addPlaceOnAxis',
           placeId: placeRes.value.id,
           axisId: addPlaceOnAx.axisId,
           distanceAlongAxis: addPlaceOnAx.distanceAlongAxis,
+          ...(addPlaceOnAx.distanceFromAxis != null &&
+            addPlaceOnAx.distanceFromAxis !== 0 && {
+              distanceFromAxis: addPlaceOnAx.distanceFromAxis,
+            }),
         });
       }
       setPendingAddPlaceOnAxis(null);
@@ -5652,6 +5834,11 @@ const App: Component = () => {
             const pmod = pendingModifyCircularRepeater();
             if (pmod) setPendingModifyCircularRepeater({ ...pmod, count: n });
           }}
+          showRepetitionPatternSection={
+            transformChoice() === 'addPlaceOnCircularRepeater' ||
+            (transformChoice() === 'modifyPlaceOnCircularRepeater' &&
+              pendingModifyPlaceOnCircularRepeater() != null)
+          }
           repetitionPatternEnabled={
             (transformChoice() === 'addPlaceOnCircularRepeater' &&
               pendingAddPlaceOnCircularRepeater()?.patternEnabled) ||
@@ -5756,6 +5943,14 @@ const App: Component = () => {
                     const pmod = pendingModifyAxis();
                     if (pmod)
                       setPendingModifyAxis({ ...pmod, isBidirectional: v });
+                  },
+                  isMirror:
+                    (pendingAddAxis() ?? pendingModifyAxis())?.isMirror ?? false,
+                  onMirrorChange: (v: boolean) => {
+                    const pa = pendingAddAxis();
+                    if (pa) setPendingAddAxis({ ...pa, isMirror: v });
+                    const pmod = pendingModifyAxis();
+                    if (pmod) setPendingModifyAxis({ ...pmod, isMirror: v });
                   },
                 }
               : null
@@ -5951,25 +6146,34 @@ const App: Component = () => {
                 placeId: PlaceId;
                 angle: number;
                 isBidirectional: boolean;
+                isMirror: boolean;
                 circularRepeaterId?: CircularRepeaterId | null;
-              }> = axes().map((axis) => ({
-                id: axis.id,
-                placeId: axis.placeId,
-                angle:
-                  pmod?.axisId === axis.id ? pmod.angle : Number(axis.angle),
-                isBidirectional:
-                  pmod?.axisId === axis.id
-                    ? pmod.isBidirectional
-                    : axis.isBidirectional !== 0,
-                circularRepeaterId: (axis as { circularRepeaterId?: CircularRepeaterId })
-                  .circularRepeaterId,
-              }));
+              }> = axes().map((axis) => {
+                const ax = axis as { isMirror?: number | null };
+                return {
+                  id: axis.id,
+                  placeId: axis.placeId,
+                  angle:
+                    pmod?.axisId === axis.id ? pmod.angle : Number(axis.angle),
+                  isBidirectional:
+                    pmod?.axisId === axis.id
+                      ? pmod.isBidirectional
+                      : axis.isBidirectional !== 0,
+                  isMirror:
+                    pmod?.axisId === axis.id
+                      ? pmod.isMirror
+                      : ax.isMirror === 1,
+                  circularRepeaterId: (axis as { circularRepeaterId?: CircularRepeaterId })
+                    .circularRepeaterId,
+                };
+              });
               if (pa)
                 axesToDraw.push({
                   id: 'pending-axis',
                   placeId: pa.placeId,
                   angle: pa.angle,
                   isBidirectional: pa.isBidirectional,
+                  isMirror: pa.isMirror,
                 });
               return axesToDraw.map((axisLike) => {
                 const geom = getAxisWorldGeometry(
@@ -6047,8 +6251,33 @@ const App: Component = () => {
                 const axisHandleY =
                   geom.originY + tClamped * Math.sin(geom.worldAngle);
                 const axisHandleSize = svgTokens.handleSize;
+                const offset = svgTokens.axisMirrorLineOffset;
+                const perpX = -Math.sin(geom.worldAngle);
+                const perpY = Math.cos(geom.worldAngle);
                 return (
                   <g>
+                    {axisLike.isMirror && (
+                      <>
+                        <line
+                          x1={seg.x1 + offset * perpX}
+                          y1={seg.y1 + offset * perpY}
+                          x2={seg.x2 + offset * perpX}
+                          y2={seg.y2 + offset * perpY}
+                          stroke={svgTokens.axisMirrorLineStroke}
+                          stroke-width={svgTokens.axisMirrorLineStrokeWidth}
+                          style={svgTokens.pointerEventsNone}
+                        />
+                        <line
+                          x1={seg.x1 - offset * perpX}
+                          y1={seg.y1 - offset * perpY}
+                          x2={seg.x2 - offset * perpX}
+                          y2={seg.y2 - offset * perpY}
+                          stroke={svgTokens.axisMirrorLineStroke}
+                          stroke-width={svgTokens.axisMirrorLineStrokeWidth}
+                          style={svgTokens.pointerEventsNone}
+                        />
+                      </>
+                    )}
                     <line
                       x1={seg.x1}
                       y1={seg.y1}

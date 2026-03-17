@@ -116,14 +116,14 @@ export const svg = {
   placeParentStroke: '#0ea5e9',
   placeChildStroke: '#10b981',
   placeUnselectedStrokeWidth: 1,
-  placeSelectedStrokeWidth: 3,
+  placeSelectedStrokeWidth: 1,
   placeSelectedCircleDasharray: '6 3',
   placeRelationCircleDasharray: '4 4',
 
-  // Orientation axis
+  // Orientation axis (full thin mid-gray line)
   orientationAxisStroke: '#999999',
   orientationAxisStrokeWidth: 1,
-  orientationAxisDasharray: '4 4',
+  orientationAxisDasharray: 'none',
   orientationAxisFill: 'black',
 
   // Axis number label (when repeater selected)
@@ -132,25 +132,32 @@ export const svg = {
   /** Distance from the axis line (perpendicular) so the label sits beside the axis. */
   axisLabelDistanceFromAxis: 14,
 
+  // Axis mirror (style guide classifier: axis acts as mirror; changes on one side reflect to the other)
+  axisMirrorLabel: 'Mirror',
+  axisMirrorLineStroke: '#cccccc',
+  axisMirrorLineStrokeWidth: 1,
+  /** Perpendicular offset from axis line (canvas units) for each mirror indicator line. */
+  axisMirrorLineOffset: 4,
+
   // Line segments
   lineSegmentUnselectedStroke: '#374151',
   lineSegmentSelectedStroke: 'darkorange',
   lineSegmentUnselectedStrokeWidth: 2,
   lineSegmentSelectedWidth: 3,
 
-  // Scaffolding (places and line segments)
-  placeScaffoldingStroke: '#999999',
+  // Scaffolding (places: small full crosses; circular fields: full circles; axes: full lines)
+  placeScaffoldingStroke: '#aaaaaa',
   placeScaffoldingStrokeWidth: 1,
-  placeScaffoldingDasharray: '4 4',
-  lineSegmentScaffoldingStroke: '#374151',
+  placeScaffoldingDasharray: 'none',
+  lineSegmentScaffoldingStroke: '#aaaaaa',
   lineSegmentScaffoldingStrokeWidth: 2,
   lineSegmentScaffoldingDasharray: '6 3',
 
-  // Circular field (scaffolding)
+  // Circular field (scaffolding: full circle and full radius line)
   circularFieldScaffoldingStroke: '#999999',
   circularFieldScaffoldingStrokeWidth: 1,
-  circularFieldScaffoldingDasharray: '4 4',
-  circularFieldRadiusLineDasharray: '4 4',
+  circularFieldScaffoldingDasharray: 'none',
+  circularFieldRadiusLineDasharray: 'none',
 
   // Pending add line
   pendingAddLineStroke: '#374151',

@@ -22,7 +22,7 @@ import {
 } from '../lib/evolu-db';
 import { lineSegmentEndDisplayName } from '../lib/lineSegmentEndName';
 import { useQuery } from '../lib/useQuery';
-import { classes, listIndentClasses } from '../styles/tokens';
+import { classes, listIndentClasses, svg as svgTokens } from '../styles/tokens';
 
 type PlaceWithAxis = {
   id: PlaceId;
@@ -43,6 +43,7 @@ function AxisTreeNode(props: {
     placeId: PlaceId;
     angle: number;
     isBidirectional?: number | null;
+    isMirror?: number | null;
   };
   axisLabel?: string;
   placesOnAxis: ReadonlyArray<PlaceWithAxis>;
@@ -78,7 +79,7 @@ function AxisTreeNode(props: {
   const isSelected = () => props.selectedAxisId === props.axis.id;
   const label = () =>
     props.axisLabel ??
-    `Axis ${props.axis.isBidirectional === 0 ? '→' : '↔'}`;
+    `Axis ${props.axis.isBidirectional === 0 ? '→' : '↔'}${(props.axis as { isMirror?: number | null }).isMirror === 1 ? ` · ${svgTokens.axisMirrorLabel}` : ''}`;
   return (
     <>
       <li
@@ -741,6 +742,7 @@ function PlaceTreeNode(props: {
                     placeId: axis.placeId,
                     angle: Number(axis.angle),
                     isBidirectional: axis.isBidirectional ?? null,
+                    isMirror: (axis as { isMirror?: number | null }).isMirror ?? null,
                   }}
                   axisLabel={`Axis ${i + 1}`}
                   placesOnAxis={placesOnAxis(axis.id)}
@@ -763,6 +765,7 @@ function PlaceTreeNode(props: {
                 placeId: axis.placeId,
                 angle: Number(axis.angle),
                 isBidirectional: axis.isBidirectional ?? null,
+                isMirror: (axis as { isMirror?: number | null }).isMirror ?? null,
               }}
               placesOnAxis={placesOnAxis(axis.id)}
               places={props.places as PlaceWithAxis[]}

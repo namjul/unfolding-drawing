@@ -68,6 +68,8 @@ interface DrawingGuideProps {
   pendingDeleteCircularRepeaterId: boolean;
   circularRepeaterCount: number;
   onRepeaterCountChange: (count: number) => void;
+  /** When false, repetition pattern UI is hidden (e.g. move on axis-mirror echo, where patterns do not apply). */
+  showRepetitionPatternSection: boolean;
   repetitionPatternEnabled: boolean;
   onRepetitionPatternEnabledChange: (enabled: boolean) => void;
   alternatingPattern: { show: number; skip: number; start: number } | null;
@@ -88,6 +90,8 @@ interface DrawingGuideProps {
   axisDirection: {
     isBidirectional: boolean;
     onDirectionChange: (isBidirectional: boolean) => void;
+    isMirror: boolean;
+    onMirrorChange: (isMirror: boolean) => void;
   } | null;
   availableTransforms: readonly {
     id: NonNullable<TransformChoice>;
@@ -174,7 +178,7 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
     if (props.transformChoice === 'addAxis') return 'Add Axis';
     if (props.transformChoice === 'modifyAxis') return 'Modify Axis';
     if (props.transformChoice === 'deleteAxis') return 'Delete Axis';
-    if (props.transformChoice === 'addPlaceOnAxis') return 'Add place on axis';
+    if (props.transformChoice === 'addPlaceOnAxis') return 'Add Place to axis';
     if (props.transformChoice === 'addPlaceOnCircularField')
       return 'Add place on circular field';
     if (props.transformChoice === 'addCircularRepeater')
@@ -537,6 +541,23 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                             <span class="text-sm">One direction</span>
                           </label>
                         </div>
+                        <div class="mt-3 flex items-center gap-2">
+                          <label class="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={props.axisDirection.isMirror}
+                              onChange={(e) =>
+                                props.axisDirection?.onMirrorChange(
+                                  e.currentTarget.checked,
+                                )
+                              }
+                              class="rounded border-slate-300"
+                            />
+                            <span class="text-sm">
+                              Mirror (changes on one side reflect to the other)
+                            </span>
+                          </label>
+                        </div>
                       </>
                     )}
                   {(props.transformChoice === 'addCircularRepeater' ||
@@ -569,9 +590,7 @@ const DrawingGuide: Component<DrawingGuideProps> = (props) => {
                       </div>
                     </>
                   )}
-                  {(props.transformChoice === 'addPlaceOnCircularRepeater' ||
-                    props.transformChoice ===
-                      'modifyPlaceOnCircularRepeater') && (
+                  {props.showRepetitionPatternSection && (
                     <>
                       <p class={classes.guideText}>
                         {props.transformChoice === 'addPlaceOnCircularRepeater'

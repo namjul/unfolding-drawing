@@ -82,7 +82,7 @@ export const TRANSFORMS: readonly TransformDef[] = [
   },
   {
     id: 'addPlaceOnAxis',
-    label: 'Add place on axis',
+    label: 'Add Place to axis',
     allowedSelectionTypes: ['axis'],
   },
   {

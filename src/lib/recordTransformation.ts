@@ -140,6 +140,7 @@ export type RecordAddAxis = {
   axisId: AxisId;
   angle: number;
   isBidirectional?: number | null;
+  isMirror?: number | null;
 };
 
 /** Payload for modify axis. */
@@ -149,6 +150,7 @@ export type RecordModifyAxis = {
   axisId: AxisId;
   angle: number;
   isBidirectional?: number | null;
+  isMirror?: number | null;
 };
 
 /** Payload for delete axis. */
@@ -164,6 +166,7 @@ export type RecordAddPlaceOnAxis = {
   placeId: PlaceId;
   axisId: AxisId;
   distanceAlongAxis: number;
+  distanceFromAxis?: number;
 };
 
 /** Payload for add place on circular field. */
@@ -436,6 +439,7 @@ export function recordTransformation(data: TransformationRecord): void {
         radius: null,
         angleOnCircle: null,
         axisIsBidirectional: data.isBidirectional ?? null,
+        axisIsMirror: data.isMirror ?? null,
       });
       break;
     case 'modifyAxis':
@@ -455,6 +459,7 @@ export function recordTransformation(data: TransformationRecord): void {
         radius: null,
         angleOnCircle: null,
         axisIsBidirectional: data.isBidirectional ?? null,
+        axisIsMirror: data.isMirror ?? null,
       });
       break;
     case 'deleteAxis':

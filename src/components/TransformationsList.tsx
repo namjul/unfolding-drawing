@@ -112,7 +112,7 @@ const TransformationsList: Component = () => {
                   `Modify axis at ${placeName} (angle: ${t.angle ?? '?'})${t.axisIsBidirectional === 0 ? ' (one direction)' : ' (both directions)'}`}
                 {t.kind === 'deleteAxis' && `Delete axis at ${placeName}`}
                 {t.kind === 'addPlaceOnAxis' &&
-                  `Add ${placeName} on axis at ${axisOwnerName}`}
+                  `Add place to axis at ${axisOwnerName}`}
                 {t.kind === 'addPlaceOnCircularField' &&
                   `Add ${placeName} on circular field at ${cfOwnerName}`}
                 {t.kind === 'addCircularRepeater' &&
