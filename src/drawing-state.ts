@@ -8,6 +8,7 @@ import type {
   TransformationEntry,
   TransformationKind,
 } from './drawing/types';
+import { TRANSFORMATION_KINDS } from './drawing/types';
 import { evolu, useEvolu } from './lib/evolu-db';
 
 const placesQuery = evolu.createQuery((db) =>
@@ -99,10 +100,7 @@ const mapPlaces = (
   }));
 
 const isTransformationKind = (value: string): value is TransformationKind =>
-  value === 'addPlace' ||
-  value === 'movePlace' ||
-  value === 'deletePlace' ||
-  value === 'resetDrawing';
+  TRANSFORMATION_KINDS.includes(value as TransformationKind);
 
 const mapTransformations = (
   rows: QueryRows<InferRow<typeof transformationsQuery>>,

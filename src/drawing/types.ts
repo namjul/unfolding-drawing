@@ -2,11 +2,15 @@ import type { Viewport } from '../canvas/viewport';
 import type { PlaceId, TransformationId } from '../lib/evolu-db';
 
 export type PlacementMode = 'free';
-export type TransformationKind =
-  | 'addPlace'
-  | 'movePlace'
-  | 'deletePlace'
-  | 'resetDrawing';
+
+export const TRANSFORMATION_KINDS = [
+  'addPlace',
+  'movePlace',
+  'deletePlace',
+  'resetDrawing',
+] as const;
+
+export type TransformationKind = (typeof TRANSFORMATION_KINDS)[number];
 
 export type SelectionTarget =
   | { kind: 'canvas' }
