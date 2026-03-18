@@ -1,6 +1,10 @@
 import type { Accessor } from 'solid-js';
 import { createSignal } from 'solid-js';
-import type { PersistedPlace, TransformationEntry } from './drawing/types';
+import type {
+  PersistedPlace,
+  TransformationEntry,
+  TransformationKind,
+} from './drawing/types';
 import type { InteractionState } from './interaction-state';
 import { Json, useEvolu } from './lib/evolu-db';
 
@@ -28,10 +32,7 @@ export const createDrawingOps = ({
     return (latestTransformation?.sequence ?? 0) + 1;
   };
 
-  const recordTransformation = (
-    kind: 'addPlace' | 'movePlace' | 'deletePlace',
-    payload: object,
-  ) => {
+  const recordTransformation = (kind: TransformationKind, payload: object) => {
     const serializedPayloadResult = Json.from(JSON.stringify(payload));
 
     if (!serializedPayloadResult.ok) {
@@ -147,8 +148,34 @@ export const createDrawingOps = ({
     }
   };
 
+  const resetDrawing = () => {
+    if (interaction.pendingTransformation().kind !== 'none') {
+      interaction.rejectPending();
+    }
+
+    const currentPlaces = places();
+
+    for (const place of currentPlaces) {
+      evolu.update('place', {
+        id: place.id,
+        isDeleted: true,
+      });
+    }
+
+    recordTransformation('resetDrawing', {
+      placeCount: currentPlaces.length,
+      timestamp: Date.now(),
+    });
+
+    interaction.setSelectionTarget({ kind: 'canvas' });
+    interaction.setHoveredPlaceId(null);
+
+    setOperationMessage('Drawing reset - all places deleted');
+  };
+
   return {
     commitPending,
     operationMessage,
+    resetDrawing,
   };
 };

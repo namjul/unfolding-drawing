@@ -13,6 +13,7 @@ interface DrawingGuideProps {
   canStageDelete: Accessor<boolean>;
   onCommitPendingChange: () => void;
   onRejectPendingChange: () => void;
+  onResetDrawing: () => void;
   onResetViewport: () => void;
   onStageDelete: () => void;
   operationMessage: Accessor<string | null>;
@@ -41,15 +42,17 @@ const describePendingTransformation = (
   }
 };
 
-const Button: ParentComponent<{ disabled?: boolean; onClick?: () => void }> = (
-  props,
-) => {
+const Button: ParentComponent<{
+  disabled?: boolean;
+  onClick?: () => void;
+  title?: string;
+}> = (props) => {
   return (
     <button
       type="button"
       onClick={props.onClick}
       disabled={props.disabled}
-      title="Reset drawing and start over (TBD)"
+      title={props.title}
       class="px-3 py-1 bg-amber-200 rounded text-sm text-slate-900  disabled:cursor-not-allowed disabled:opacity-40 disabled:pointer-events-none "
     >
       {props.children}
@@ -71,13 +74,25 @@ const Panel: ParentComponent<{ title: string }> = (props) => {
 };
 
 const DrawingGuideProps = (props: DrawingGuideProps) => {
+  const handleResetDrawing = () => {
+    const confirmed = confirm('Delete all places? This cannot be undone.');
+    if (confirmed) {
+      props.onResetDrawing();
+    }
+  };
+
   return (
     <div class="space-y-4">
       <p class="text-xs uppercase tracking-[0.3em]">Grawing Guide</p>
 
       <Panel title="Observation">
         <div class="flex flex-col gap-2">
-          <Button disabled={true}>Reset Drawing</Button>
+          <Button
+            onClick={handleResetDrawing}
+            title="Delete all places and return to empty canvas"
+          >
+            Reset Drawing
+          </Button>
           <Button onClick={props.onResetViewport}>Reset view</Button>
         </div>
         <p class="text-sm text-slate-600 mt-2">
@@ -86,7 +101,9 @@ const DrawingGuideProps = (props: DrawingGuideProps) => {
       </Panel>
 
       <Panel title="Selection">
-      <p class="text-sm text-slate-600 mt-2">Select a drawing object on the canvas or the canvas.</p>
+        <p class="text-sm text-slate-600 mt-2">
+          Select a drawing object on the canvas or the canvas.
+        </p>
         <Show
           when={props.selectionTarget().kind === 'place'}
           fallback={<p class="mt-3 text-slate-600">Canvas selected</p>}

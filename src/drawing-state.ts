@@ -99,7 +99,10 @@ const mapPlaces = (
   }));
 
 const isTransformationKind = (value: string): value is TransformationKind =>
-  value === 'addPlace' || value === 'movePlace' || value === 'deletePlace';
+  value === 'addPlace' ||
+  value === 'movePlace' ||
+  value === 'deletePlace' ||
+  value === 'resetDrawing';
 
 const mapTransformations = (
   rows: QueryRows<InferRow<typeof transformationsQuery>>,

@@ -96,6 +96,7 @@ const App = () => {
           canStageDelete={canStageDelete}
           onCommitPendingChange={drawingOps.commitPending}
           onRejectPendingChange={interaction.rejectPending}
+          onResetDrawing={drawingOps.resetDrawing}
           onResetViewport={resetViewport}
           onStageDelete={handleStageDelete}
           operationMessage={drawingOps.operationMessage}
