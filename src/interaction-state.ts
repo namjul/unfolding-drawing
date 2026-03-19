@@ -28,11 +28,13 @@ export interface InteractionState {
   setSelectionTarget: (target: SelectionTarget) => void;
   awaitingTransformationTarget: () => AwaitingTransformationTarget;
   beginAddPlace: () => void;
+  beginAddRelatedPlace: () => void;
   beginMovePlace: () => void;
   clearAwaitingTransformationTarget: () => void;
   setHoveredPlaceId: Setter<string | null>;
   setViewport: Setter<Viewport>;
   stageAddPlace: (x: number, y: number) => boolean;
+  stageAddRelatedPlace: (x: number, y: number) => boolean;
   stageDeletePlace: (placeId: PlaceId) => boolean;
   stageMovePlace: (placeId: PlaceId, x: number, y: number) => boolean;
   updatePendingMove: (x: number, y: number) => void;
@@ -159,6 +161,20 @@ export const createInteractionState = (): InteractionState => {
     setAwaitingTransformationTarget({ kind: 'addPlace' });
   };
 
+  const beginAddRelatedPlace = () => {
+    const target = selectionTarget();
+    if (target.kind !== 'place') return;
+
+    if (pendingTransformation().kind !== 'none') {
+      rejectPending();
+    }
+
+    setAwaitingTransformationTarget({
+      kind: 'addRelatedPlace',
+      parentPlaceId: target.placeId as PlaceId,
+    });
+  };
+
   const beginMovePlace = () => {
     const target = selectionTarget();
     if (target.kind !== 'place') return;
@@ -173,6 +189,38 @@ export const createInteractionState = (): InteractionState => {
     });
   };
 
+  const stageAddRelatedPlace = (x: number, y: number) => {
+    const awaiting = awaitingTransformationTarget();
+    if (awaiting.kind !== 'addRelatedPlace') {
+      return false;
+    }
+
+    if (pendingTransformation().kind !== 'none') {
+      return false;
+    }
+
+    const nextPlace = {
+      id: createDraftPlaceId(),
+      name: null,
+      x,
+      y,
+      angle: null,
+      parentPlaceId: awaiting.parentPlaceId,
+      placementMode: 'free' as const,
+    };
+
+    setPendingTransformation({
+      kind: 'addRelatedPlace',
+      place: nextPlace,
+      parentPlaceId: awaiting.parentPlaceId,
+    });
+    setSelectionTarget({ kind: 'place', placeId: nextPlace.id });
+    setHoveredPlaceId(nextPlace.id);
+    clearAwaitingTransformationTarget();
+
+    return true;
+  };
+
   return {
     hoveredPlaceId,
     pendingTransformation,
@@ -182,11 +230,13 @@ export const createInteractionState = (): InteractionState => {
     setSelectionTarget,
     awaitingTransformationTarget,
     beginAddPlace,
+    beginAddRelatedPlace,
     beginMovePlace,
     clearAwaitingTransformationTarget,
     setHoveredPlaceId,
     setViewport,
     stageAddPlace,
+    stageAddRelatedPlace,
     stageDeletePlace,
     stageMovePlace,
     updatePendingMove,

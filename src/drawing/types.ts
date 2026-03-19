@@ -5,6 +5,7 @@ export type PlacementMode = 'free';
 
 export const TRANSFORMATION_KINDS = [
   'addPlace',
+  'addRelatedPlace',
   'movePlace',
   'deletePlace',
   'resetDrawing',
@@ -19,6 +20,7 @@ export type SelectionTarget =
 export type AwaitingTransformationTarget =
   | { kind: 'none' }
   | { kind: 'addPlace' }
+  | { kind: 'addRelatedPlace'; parentPlaceId: PlaceId }
   | { kind: 'movePlace'; placeId: PlaceId };
 
 export interface PersistedPlace {
@@ -37,7 +39,7 @@ export interface DraftPlace {
   x: number;
   y: number;
   angle: null;
-  parentPlaceId: null;
+  parentPlaceId: PlaceId | null;
   placementMode: 'free';
 }
 
@@ -64,6 +66,7 @@ export interface TransformationEntry {
 export type PendingTransformationState =
   | { kind: 'none' }
   | { kind: 'addPlace'; place: DraftPlace }
+  | { kind: 'addRelatedPlace'; place: DraftPlace; parentPlaceId: PlaceId }
   | {
       kind: 'movePlace';
       placeId: PlaceId;

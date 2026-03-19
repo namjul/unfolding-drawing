@@ -33,6 +33,8 @@ interface PaintSet {
   selectedRing: Paint;
   stagedDelete: Paint;
   canvasSelectionBorder: Paint;
+  relationshipLine: Paint;
+  relationshipLineHighlight: Paint;
 }
 
 interface CanvasRuntime {
@@ -45,6 +47,7 @@ interface PlaceCanvasProps {
   hoveredPlaceId: Accessor<string | null>;
   onSelectPlace: (target: SelectionTarget) => void;
   onStageAddPlace: (x: number, y: number) => boolean;
+  onStageAddRelatedPlace: (x: number, y: number) => boolean;
   onStageMovePlace: (placeId: PlaceId, x: number, y: number) => boolean;
   onSurfaceSizeChange: Setter<{ width: number; height: number }>;
   onUpdateHoverPlace: Setter<string | null>;
@@ -145,6 +148,8 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
     runtime.paints.selectedRing.delete();
     runtime.paints.stagedDelete.delete();
     runtime.paints.canvasSelectionBorder.delete();
+    runtime.paints.relationshipLine.delete();
+    runtime.paints.relationshipLineHighlight.delete();
     runtime = null;
   };
 
@@ -184,6 +189,16 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
     canvasSelectionBorder.setStyle(canvasKit.PaintStyle.Stroke);
     canvasSelectionBorder.setColor(canvasKit.Color(248, 113, 113, 1));
 
+    const relationshipLine = new canvasKit.Paint();
+    relationshipLine.setAntiAlias(true);
+    relationshipLine.setStyle(canvasKit.PaintStyle.Stroke);
+    relationshipLine.setColor(canvasKit.Color(128, 128, 128, 0.4));
+
+    const relationshipLineHighlight = new canvasKit.Paint();
+    relationshipLineHighlight.setAntiAlias(true);
+    relationshipLineHighlight.setStyle(canvasKit.PaintStyle.Stroke);
+    relationshipLineHighlight.setColor(canvasKit.Color(56, 189, 248, 0.8));
+
     return {
       canvasGrid,
       draftPlace,
@@ -192,6 +207,8 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
       selectedRing,
       stagedDelete,
       canvasSelectionBorder,
+      relationshipLine,
+      relationshipLineHighlight,
     };
   };
 
@@ -232,6 +249,37 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
   //   }
   // };
 
+  const drawRelationshipLines = (
+    canvas: Canvas,
+    places: ReadonlyArray<DisplayPlace>,
+    selectedPlaceId: string | null,
+    viewport: Viewport,
+  ) => {
+    if (!runtime) {
+      return;
+    }
+
+    for (const place of places) {
+      if (place.parentPlaceId === null) {
+        continue;
+      }
+
+      const parent = places.find((p) => p.id === place.parentPlaceId);
+      if (!parent) {
+        continue;
+      }
+
+      const isHighlighted =
+        place.id === selectedPlaceId || parent.id === selectedPlaceId;
+      const paint = isHighlighted
+        ? runtime.paints.relationshipLineHighlight
+        : runtime.paints.relationshipLine;
+
+      paint.setStrokeWidth(2 / viewport.scale);
+      canvas.drawLine(parent.x, parent.y, place.x, place.y, paint);
+    }
+  };
+
   const drawScene = (canvas: Canvas) => {
     if (!runtime) {
       return;
@@ -240,6 +288,7 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
     const currentViewport = props.viewport();
     const selectedPlaceId = props.selectedPlaceId();
     const hoveredPlaceId = props.hoveredPlaceId();
+    const currentPlaces = props.places();
     // const currentSize = canvasSize();
 
     canvas.clear(backgroundColor);
@@ -248,7 +297,14 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
     canvas.scale(currentViewport.scale, currentViewport.scale);
     // drawGrid(canvas, runtime.canvasKit, currentViewport, currentSize);
 
-    for (const place of props.places()) {
+    drawRelationshipLines(
+      canvas,
+      currentPlaces,
+      selectedPlaceId,
+      currentViewport,
+    );
+
+    for (const place of currentPlaces) {
       const fillPaint = place.isMarkedForDeletion
         ? runtime.paints.stagedDelete
         : place.isDraft
@@ -514,6 +570,9 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
 
       if (awaiting.kind === 'addPlace' && isTap) {
         props.onStageAddPlace(world.x, world.y);
+        props.onClearAwaitingTransformation();
+      } else if (awaiting.kind === 'addRelatedPlace' && isTap) {
+        props.onStageAddRelatedPlace(world.x, world.y);
         props.onClearAwaitingTransformation();
       } else if (awaiting.kind === 'movePlace' && isTap) {
         props.onStageMovePlace(awaiting.placeId, world.x, world.y);

@@ -96,6 +96,36 @@ export const createDrawingOps = ({
         setOperationMessage('Place committed to local persistence.');
         return;
       }
+      case 'addRelatedPlace': {
+        const result = evolu.insert('place', {
+          angle: pending.place.angle,
+          name: pending.place.name,
+          parentPlaceId: pending.parentPlaceId,
+          placementMode: pending.place.placementMode,
+          x: pending.place.x,
+          y: pending.place.y,
+        });
+
+        if (!result.ok) {
+          setOperationMessage('Unable to commit the staged related place.');
+          return;
+        }
+
+        recordTransformation('addRelatedPlace', {
+          placeId: result.value.id,
+          parentPlaceId: pending.parentPlaceId,
+          x: pending.place.x,
+          y: pending.place.y,
+        });
+        interaction.setSelectionTarget({
+          kind: 'place',
+          placeId: result.value.id,
+        });
+        interaction.setHoveredPlaceId(result.value.id);
+        interaction.rejectPending();
+        setOperationMessage('Related place committed to local persistence.');
+        return;
+      }
       case 'movePlace': {
         const result = evolu.update('place', {
           id: pending.placeId,

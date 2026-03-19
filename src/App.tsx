@@ -101,13 +101,16 @@ const App = () => {
           onStageDelete={handleStageDelete}
           operationMessage={drawingOps.operationMessage}
           pendingTransformation={interaction.pendingTransformation}
+          places={displayPlaces}
           selectedPlaceId={interaction.selectedPlaceId}
           selectionTarget={interaction.selectionTarget}
           awaitingTransformationTarget={
             interaction.awaitingTransformationTarget
           }
           onBeginAddPlace={interaction.beginAddPlace}
+          onBeginAddRelatedPlace={interaction.beginAddRelatedPlace}
           onBeginMovePlace={interaction.beginMovePlace}
+          onSelectPlace={interaction.setSelectionTarget}
           transformations={drawing.transformations}
           viewport={interaction.viewport}
         />
@@ -117,6 +120,7 @@ const App = () => {
           hoveredPlaceId={interaction.hoveredPlaceId}
           onSelectPlace={interaction.setSelectionTarget}
           onStageAddPlace={interaction.stageAddPlace}
+          onStageAddRelatedPlace={interaction.stageAddRelatedPlace}
           onStageMovePlace={interaction.stageMovePlace}
           onSurfaceSizeChange={setSurfaceSize}
           onUpdateHoverPlace={interaction.setHoveredPlaceId}

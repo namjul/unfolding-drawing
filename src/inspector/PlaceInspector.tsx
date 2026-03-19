@@ -18,11 +18,14 @@ interface DrawingGuideProps {
   onStageDelete: () => void;
   operationMessage: Accessor<string | null>;
   pendingTransformation: Accessor<PendingTransformationState>;
+  places: Accessor<ReadonlyArray<DisplayPlace>>;
   selectedPlaceId: Accessor<string | null>;
   selectionTarget: Accessor<SelectionTarget>;
   awaitingTransformationTarget: Accessor<AwaitingTransformationTarget>;
   onBeginAddPlace: () => void;
+  onBeginAddRelatedPlace: () => void;
   onBeginMovePlace: () => void;
+  onSelectPlace: (target: SelectionTarget) => void;
   transformations: Accessor<ReadonlyArray<TransformationEntry>>;
   viewport: Accessor<Viewport>;
 }
@@ -33,6 +36,8 @@ const describePendingTransformation = (
   switch (pendingTransformation.kind) {
     case 'addPlace':
       return 'A new place is staged locally and not yet persisted.';
+    case 'addRelatedPlace':
+      return 'A new related place is staged with parent relationship. Commit to persist, or reject to discard.';
     case 'movePlace':
       return 'A place move is staged. Commit to persist, or reject to restore the last committed position.';
     case 'deletePlace':
@@ -130,31 +135,46 @@ const DrawingGuideProps = (props: DrawingGuideProps) => {
 
       <Panel title="Transformations">
         <Show
-          when={props.selectionTarget().kind === 'canvas'}
+          when={props.awaitingTransformationTarget().kind === 'addRelatedPlace'}
           fallback={
-            <div class="mt-3 flex flex-col gap-2">
-              <Button
-                disabled={props.pendingTransformation().kind !== 'none'}
-                onClick={props.onBeginMovePlace}
-              >
-                Move Place
-              </Button>
-              <Button
-                disabled={!props.canStageDelete()}
-                onClick={props.onStageDelete}
-              >
-                Delete Place
-              </Button>
-            </div>
+            <Show
+              when={props.selectionTarget().kind === 'canvas'}
+              fallback={
+                <div class="mt-3 flex flex-col gap-2">
+                  <Button
+                    disabled={props.pendingTransformation().kind !== 'none'}
+                    onClick={props.onBeginAddRelatedPlace}
+                  >
+                    Add Related Place
+                  </Button>
+                  <Button
+                    disabled={props.pendingTransformation().kind !== 'none'}
+                    onClick={props.onBeginMovePlace}
+                  >
+                    Move Place
+                  </Button>
+                  <Button
+                    disabled={!props.canStageDelete()}
+                    onClick={props.onStageDelete}
+                  >
+                    Delete Place
+                  </Button>
+                </div>
+              }
+            >
+              <div class="mt-3 flex flex-col gap-2">
+                <Button
+                  disabled={props.pendingTransformation().kind !== 'none'}
+                  onClick={props.onBeginAddPlace}
+                >
+                  Add Place
+                </Button>
+              </div>
+            </Show>
           }
         >
-          <div class="mt-3 flex flex-col gap-2">
-            <Button
-              disabled={props.pendingTransformation().kind !== 'none'}
-              onClick={props.onBeginAddPlace}
-            >
-              Add Place
-            </Button>
+          <div class="mt-3 text-amber-700">
+            <p>Click canvas to place child of selected place</p>
           </div>
         </Show>
       </Panel>
@@ -199,9 +219,66 @@ const DrawingGuideProps = (props: DrawingGuideProps) => {
               <Show when={place().isMarkedForDeletion}>
                 <p class="text-rose-300">Marked for deletion</p>
               </Show>
+              <Show when={place().parentPlaceId}>
+                <p class="text-sky-600">
+                  Parent: {place().parentPlaceId?.slice(0, 8)}
+                </p>
+              </Show>
             </div>
           )}
         </Show>
+      </Panel>
+
+      <Panel title="Structure">
+        <div class="mt-3 space-y-1">
+          <For
+            each={props
+              .places()
+              .filter((p) => !p.isDraft && !p.isMarkedForDeletion)}
+          >
+            {(place) => {
+              const isRoot = place.parentPlaceId === null;
+              const childCount = props
+                .places()
+                .filter(
+                  (p) =>
+                    p.parentPlaceId === place.id &&
+                    !p.isDraft &&
+                    !p.isMarkedForDeletion,
+                ).length;
+              const isSelected = props.selectedPlaceId() === place.id;
+
+              return (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      props.onSelectPlace({ kind: 'place', placeId: place.id })
+                    }
+                    class={`w-full text-left px-2 py-1 text-sm rounded hover:bg-sky-100 ${
+                      isSelected ? 'bg-sky-200 font-medium' : ''
+                    } ${isRoot ? '' : 'pl-6'}`}
+                  >
+                    {place.name ?? `Place ${place.id.slice(0, 8)}`}
+                    {childCount > 0 && (
+                      <span class="text-xs text-slate-500 ml-2">
+                        ({childCount} {childCount === 1 ? 'child' : 'children'})
+                      </span>
+                    )}
+                  </button>
+                </div>
+              );
+            }}
+          </For>
+          <Show
+            when={
+              props.places().filter((p) => !p.isDraft && !p.isMarkedForDeletion)
+                .length === 0
+            }
+          >
+            <p class="text-stone-400">No places yet.</p>
+          </Show>
+        </div>
       </Panel>
 
       <Panel title="Viewport">
