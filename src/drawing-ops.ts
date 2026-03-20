@@ -1,5 +1,10 @@
 import type { Accessor } from 'solid-js';
 import { createSignal } from 'solid-js';
+import {
+  buildPlaceMap,
+  computeWorldPosition,
+  getDescendants,
+} from './canvas/hierarchy';
 import type {
   PersistedPlace,
   TransformationEntry,
@@ -127,10 +132,33 @@ export const createDrawingOps = ({
         return;
       }
       case 'movePlace': {
+        const placeMap = buildPlaceMap(places());
+        const place = placeMap.get(pending.placeId);
+
+        if (!place) {
+          setOperationMessage('Unable to find place to move.');
+          return;
+        }
+
+        // Determine what coordinates to store
+        let storeX = pending.to.x;
+        let storeY = pending.to.y;
+
+        if (place.parentPlaceId !== null) {
+          // Child place: convert world target to offset
+          const parent = placeMap.get(place.parentPlaceId);
+          if (parent) {
+            const parentWorld = computeWorldPosition(parent, placeMap);
+            storeX = pending.to.x - parentWorld.x;
+            storeY = pending.to.y - parentWorld.y;
+          }
+        }
+        // Root place: store world coordinates directly
+
         const result = evolu.update('place', {
           id: pending.placeId,
-          x: pending.to.x,
-          y: pending.to.y,
+          x: storeX,
+          y: storeY,
         });
 
         if (!result.ok) {
@@ -153,18 +181,30 @@ export const createDrawingOps = ({
         return;
       }
       case 'deletePlace': {
-        const deletedPlace =
-          places().find((place) => place.id === pending.placeId) ?? null;
-        const result = evolu.update('place', {
-          id: pending.placeId,
-          isDeleted: true,
-        });
+        const placeMap = buildPlaceMap(places());
+        const deletedPlace = placeMap.get(pending.placeId) ?? null;
 
-        if (!result.ok) {
-          setOperationMessage('Unable to commit the staged deletion.');
-          return;
+        // Cascade delete: delete place and all descendants
+        const placesToDelete = [pending.placeId];
+        const descendants = getDescendants(pending.placeId, placeMap);
+        for (const descendant of descendants) {
+          placesToDelete.push(descendant.id);
         }
 
+        // Delete all places in the subtree
+        for (const placeId of placesToDelete) {
+          const result = evolu.update('place', {
+            id: placeId,
+            isDeleted: true,
+          });
+
+          if (!result.ok) {
+            setOperationMessage('Unable to commit the staged deletion.');
+            return;
+          }
+        }
+
+        // Record transformation for the parent only - descendant deletions are implicit
         recordTransformation('deletePlace', {
           placeId: pending.placeId,
           x: deletedPlace?.x ?? null,

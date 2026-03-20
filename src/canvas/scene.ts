@@ -3,6 +3,12 @@ import type {
   PendingTransformationState,
   PersistedPlace,
 } from '../drawing/types';
+import {
+  buildPlaceMap,
+  calculateDelta,
+  computeWorldPosition,
+  isDescendantOf,
+} from './hierarchy';
 
 export interface SceneBounds {
   minX: number;
@@ -22,48 +28,104 @@ export const deriveDisplayPlaces = (
   places: ReadonlyArray<PersistedPlace>,
   pendingTransformation: PendingTransformationState,
 ): ReadonlyArray<DisplayPlace> => {
-  const nextPlaces = places.map<DisplayPlace>((place) => ({
-    ...place,
-    parentPlaceId: place.parentPlaceId,
-    isDraft: false,
-    isMarkedForDeletion: false,
-  }));
+  // Build place map for hierarchy traversal
+  const placeMap = buildPlaceMap(places);
+
+  // Compute world positions for all places
+  const computeWorld = (place: PersistedPlace) =>
+    computeWorldPosition(place, placeMap);
+
+  const nextPlaces = places.map<DisplayPlace>((place) => {
+    const worldPos = computeWorld(place);
+    return {
+      ...place,
+      x: worldPos.x,
+      y: worldPos.y,
+      parentPlaceId: place.parentPlaceId,
+      isDraft: false,
+      isMarkedForDeletion: false,
+    };
+  });
 
   switch (pendingTransformation.kind) {
-    case 'addPlace':
+    case 'addPlace': {
+      const draftWorld = computeWorldPosition(
+        pendingTransformation.place,
+        placeMap,
+      );
       return [
         ...nextPlaces,
         {
           ...pendingTransformation.place,
+          x: draftWorld.x,
+          y: draftWorld.y,
           isDraft: true,
           isMarkedForDeletion: false,
         },
       ];
-    case 'addRelatedPlace':
+    }
+    case 'addRelatedPlace': {
+      // Draft related place: compute world from stored offset + parent world
+      const draftWorld = computeWorldPosition(
+        pendingTransformation.place,
+        placeMap,
+      );
       return [
         ...nextPlaces,
         {
           ...pendingTransformation.place,
+          x: draftWorld.x,
+          y: draftWorld.y,
           isDraft: true,
           isMarkedForDeletion: false,
         },
       ];
-    case 'movePlace':
-      return nextPlaces.map((place) =>
-        place.id === pendingTransformation.placeId
-          ? {
-              ...place,
-              x: pendingTransformation.to.x,
-              y: pendingTransformation.to.y,
-            }
-          : place,
-      );
-    case 'deletePlace':
-      return nextPlaces.map((place) =>
-        place.id === pendingTransformation.placeId
-          ? { ...place, isMarkedForDeletion: true }
-          : place,
-      );
+    }
+    case 'movePlace': {
+      const movedPlaceId = pendingTransformation.placeId;
+      const movedPlace = placeMap.get(movedPlaceId);
+      if (!movedPlace) {
+        return nextPlaces;
+      }
+
+      // Calculate delta from current world position to target
+      const currentWorld = computeWorldPosition(movedPlace, placeMap);
+      const delta = calculateDelta(currentWorld, pendingTransformation.to);
+
+      // Apply delta to moved place and all descendants
+      return nextPlaces.map((place) => {
+        if (place.id === movedPlaceId) {
+          // The moved place itself
+          return {
+            ...place,
+            x: pendingTransformation.to.x,
+            y: pendingTransformation.to.y,
+          };
+        }
+        if (isDescendantOf(place.id, movedPlaceId, placeMap)) {
+          // Descendant: add delta to their world position
+          return {
+            ...place,
+            x: place.x + delta.x,
+            y: place.y + delta.y,
+          };
+        }
+        return place;
+      });
+    }
+    case 'deletePlace': {
+      const deletedPlaceId = pendingTransformation.placeId;
+      // Mark place and all descendants for deletion
+      return nextPlaces.map((place) => {
+        if (place.id === deletedPlaceId) {
+          return { ...place, isMarkedForDeletion: true };
+        }
+        if (isDescendantOf(place.id, deletedPlaceId, placeMap)) {
+          return { ...place, isMarkedForDeletion: true };
+        }
+        return place;
+      });
+    }
     default:
       return nextPlaces;
   }

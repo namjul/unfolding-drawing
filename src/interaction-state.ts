@@ -1,6 +1,8 @@
 import type { Setter } from 'solid-js';
 import { createSignal } from 'solid-js';
+import { buildPlaceMap, computeWorldPosition } from './canvas/hierarchy';
 import type { Viewport } from './canvas/viewport';
+import type { PersistedPlace } from './drawing/types';
 import {
   type AwaitingTransformationTarget,
   createNoPendingTransformation,
@@ -34,9 +36,18 @@ export interface InteractionState {
   setHoveredPlaceId: Setter<string | null>;
   setViewport: Setter<Viewport>;
   stageAddPlace: (x: number, y: number) => boolean;
-  stageAddRelatedPlace: (x: number, y: number) => boolean;
+  stageAddRelatedPlace: (
+    x: number,
+    y: number,
+    places: ReadonlyArray<PersistedPlace>,
+  ) => boolean;
   stageDeletePlace: (placeId: PlaceId) => boolean;
-  stageMovePlace: (placeId: PlaceId, x: number, y: number) => boolean;
+  stageMovePlace: (
+    placeId: PlaceId,
+    x: number,
+    y: number,
+    places: ReadonlyArray<PersistedPlace>,
+  ) => boolean;
   updatePendingMove: (x: number, y: number) => void;
   viewport: () => Viewport;
 }
@@ -84,7 +95,12 @@ export const createInteractionState = (): InteractionState => {
     return true;
   };
 
-  const stageMovePlace = (placeId: PlaceId, x: number, y: number) => {
+  const stageMovePlace = (
+    placeId: PlaceId,
+    x: number,
+    y: number,
+    places: ReadonlyArray<PersistedPlace>,
+  ) => {
     const pending = pendingTransformation();
 
     if (
@@ -94,13 +110,18 @@ export const createInteractionState = (): InteractionState => {
       return false;
     }
 
+    // Compute current world position for "from" coordinate
+    const placeMap = buildPlaceMap(places);
+    const place = placeMap.get(placeId);
+    const fromWorld = place ? computeWorldPosition(place, placeMap) : { x, y };
+
     setPendingTransformation({
       kind: 'movePlace',
       placeId,
       from:
         pending.kind === 'movePlace' && pending.placeId === placeId
           ? pending.from
-          : { x, y },
+          : fromWorld,
       to: { x, y },
     });
     setSelectionTarget({ kind: 'place', placeId });
@@ -189,7 +210,11 @@ export const createInteractionState = (): InteractionState => {
     });
   };
 
-  const stageAddRelatedPlace = (x: number, y: number) => {
+  const stageAddRelatedPlace = (
+    x: number,
+    y: number,
+    places: ReadonlyArray<PersistedPlace>,
+  ) => {
     const awaiting = awaitingTransformationTarget();
     if (awaiting.kind !== 'addRelatedPlace') {
       return false;
@@ -199,11 +224,22 @@ export const createInteractionState = (): InteractionState => {
       return false;
     }
 
+    // Compute parent's world position to calculate offset
+    const placeMap = buildPlaceMap(places);
+    const parent = placeMap.get(awaiting.parentPlaceId);
+    const parentWorld = parent
+      ? computeWorldPosition(parent, placeMap)
+      : { x: 0, y: 0 };
+
+    // Calculate offset from parent's world position
+    const offsetX = x - parentWorld.x;
+    const offsetY = y - parentWorld.y;
+
     const nextPlace = {
       id: createDraftPlaceId(),
       name: null,
-      x,
-      y,
+      x: offsetX,
+      y: offsetY,
       angle: null,
       parentPlaceId: awaiting.parentPlaceId,
       placementMode: 'relativeToParent' as const,

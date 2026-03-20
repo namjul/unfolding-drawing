@@ -1,0 +1,11 @@
+schema: spec-driven
+status: ready-for-implementation
+created: 2026-03-19
+updated: 2026-03-20
+
+notes:
+  - Evaluated against Stage 2 completion and v1 architecture
+  - Confirmed dual coordinate interpretation (x/y = world for roots, offset for children)
+  - Children movements remain implicit (not recorded in history)
+  - Clear utility functions in hierarchy.ts explain semantics
+  - Implementation can proceed

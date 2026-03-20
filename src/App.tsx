@@ -77,6 +77,15 @@ const App = () => {
     interaction.stageDeletePlace(selected.id as PlaceId);
   };
 
+  // Wrapper functions to pass places data for offset computation
+  const handleStageAddRelatedPlace = (x: number, y: number) => {
+    return interaction.stageAddRelatedPlace(x, y, drawing.places());
+  };
+
+  const handleStageMovePlace = (placeId: PlaceId, x: number, y: number) => {
+    return interaction.stageMovePlace(placeId, x, y, drawing.places());
+  };
+
   createEffect(() => {
     const size = surfaceSize();
 
@@ -120,8 +129,8 @@ const App = () => {
           hoveredPlaceId={interaction.hoveredPlaceId}
           onSelectPlace={interaction.setSelectionTarget}
           onStageAddPlace={interaction.stageAddPlace}
-          onStageAddRelatedPlace={interaction.stageAddRelatedPlace}
-          onStageMovePlace={interaction.stageMovePlace}
+          onStageAddRelatedPlace={handleStageAddRelatedPlace}
+          onStageMovePlace={handleStageMovePlace}
           onSurfaceSizeChange={setSurfaceSize}
           onUpdateHoverPlace={interaction.setHoveredPlaceId}
           onUpdateMovePlace={interaction.updatePendingMove}
