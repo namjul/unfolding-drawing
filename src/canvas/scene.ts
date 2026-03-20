@@ -39,6 +39,15 @@ export const deriveDisplayPlaces = (
           isMarkedForDeletion: false,
         },
       ];
+    case 'addRelatedPlace':
+      return [
+        ...nextPlaces,
+        {
+          ...pendingTransformation.place,
+          isDraft: true,
+          isMarkedForDeletion: false,
+        },
+      ];
     case 'movePlace':
       return nextPlaces.map((place) =>
         place.id === pendingTransformation.placeId

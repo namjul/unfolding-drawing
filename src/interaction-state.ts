@@ -206,7 +206,7 @@ export const createInteractionState = (): InteractionState => {
       y,
       angle: null,
       parentPlaceId: awaiting.parentPlaceId,
-      placementMode: 'free' as const,
+      placementMode: 'relativeToParent' as const,
     };
 
     setPendingTransformation({

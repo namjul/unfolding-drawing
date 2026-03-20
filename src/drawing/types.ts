@@ -1,7 +1,7 @@
 import type { Viewport } from '../canvas/viewport';
 import type { PlaceId, TransformationId } from '../lib/evolu-db';
 
-export type PlacementMode = 'free';
+export type PlacementMode = 'free' | 'relativeToParent';
 
 export const TRANSFORMATION_KINDS = [
   'addPlace',
@@ -40,7 +40,7 @@ export interface DraftPlace {
   y: number;
   angle: null;
   parentPlaceId: PlaceId | null;
-  placementMode: 'free';
+  placementMode: 'free' | 'relativeToParent';
 }
 
 export interface DisplayPlace {
@@ -50,7 +50,7 @@ export interface DisplayPlace {
   y: number;
   angle: number | null;
   parentPlaceId: string | null;
-  placementMode: PlacementMode;
+  placementMode: 'free' | 'relativeToParent';
   isDraft: boolean;
   isMarkedForDeletion: boolean;
 }

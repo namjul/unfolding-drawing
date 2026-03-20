@@ -9,14 +9,15 @@ import {
   literal,
   nullOr,
   SimpleName,
+  union,
 } from '@evolu/common';
 import { evoluWebDeps } from '@evolu/web';
 import { createUseEvolu } from './evolu';
 
 export { Json };
 
-const FreePlacementMode = literal('free');
-export type PlacementMode = typeof FreePlacementMode.Type;
+const PlacementMode = union(literal('free'), literal('relativeToParent'));
+export type PlacementMode = typeof PlacementMode.Type;
 
 export const PlaceId = id('Place');
 export type PlaceId = typeof PlaceId.Type;
@@ -32,7 +33,7 @@ export const Schema = {
     y: FiniteNumber,
     angle: nullOr(FiniteNumber),
     parentPlaceId: nullOr(PlaceId),
-    placementMode: FreePlacementMode,
+    placementMode: PlacementMode,
   },
   transformation: {
     id: TransformationId,
