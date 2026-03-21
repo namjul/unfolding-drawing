@@ -11,10 +11,10 @@ type PlaceLike = {
 /**
  * Build a lookup map from place ID to place for efficient parent-child traversal.
  */
-export const buildPlaceMap = (
-  places: ReadonlyArray<PersistedPlace>,
-): Map<string, PersistedPlace> => {
-  const placeMap = new Map<string, PersistedPlace>();
+export const buildPlaceMap = <T extends PlaceLike>(
+  places: ReadonlyArray<T>,
+): Map<string, T> => {
+  const placeMap = new Map<string, T>();
   for (const place of places) {
     placeMap.set(place.id, place);
   }
@@ -111,6 +111,41 @@ export const getDescendants = (
     }
   }
   return descendants;
+};
+
+/**
+ * Get all descendant place IDs recursively from a starting place.
+ * This builds a set of IDs for the entire subtree (children, grandchildren, etc.)
+ *
+ * @param startId - ID of the place to start from (included in result)
+ * @param placeMap - Map of all places
+ * @param visited - Set of visited place IDs (for cycle detection)
+ * @returns Set of all place IDs in the subtree (including startId)
+ */
+export const getSubtreePlaceIds = <T extends PlaceLike>(
+  startId: string,
+  placeMap: Map<string, T>,
+  visited = new Set<string>(),
+): Set<string> => {
+  // Cycle detection: prevent infinite recursion
+  if (visited.has(startId)) {
+    return new Set();
+  }
+  visited.add(startId);
+
+  const subtreeIds = new Set<string>([startId]);
+
+  // Find all direct children and recursively collect their subtrees
+  for (const place of placeMap.values()) {
+    if (place.parentPlaceId === startId) {
+      const childSubtree = getSubtreePlaceIds(place.id, placeMap, visited);
+      for (const id of childSubtree) {
+        subtreeIds.add(id);
+      }
+    }
+  }
+
+  return subtreeIds;
 };
 
 /**

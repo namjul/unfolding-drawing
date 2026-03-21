@@ -22,6 +22,7 @@ import type {
 } from '../drawing/types';
 import type { PlaceId } from '../lib/evolu-db';
 import { hitTestPlace } from './hitTest';
+import { buildPlaceMap, getSubtreePlaceIds } from './parent-objects';
 import { getPlaceLabel } from './scene';
 import { screenToWorld, type Viewport, zoomViewportAt } from './viewport';
 
@@ -84,6 +85,7 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
   let activeDragMode: 'pan' | 'move' | 'idle' = 'idle';
   let moveCandidateId: PlaceId | null = null;
   const moveOffset = { x: 0, y: 0 };
+  let dashPhase = 0; // Animation phase for relationship line dash effect
 
   const [status, setStatus] = createSignal('Loading CanvasKit...');
   const [canvasSize, setCanvasSize] = createSignal({ width: 0, height: 0 });
@@ -116,7 +118,7 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
 
     const activeRuntime = runtime;
     drawQueued = true;
-    drawFrameId = window.requestAnimationFrame(() => {
+    drawFrameId = window.requestAnimationFrame((timestamp) => {
       drawFrameId = null;
       drawQueued = false;
 
@@ -124,8 +126,17 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
         return;
       }
 
+      // Update dash animation phase (50px per second)
+      dashPhase = (timestamp / 1000) * 50;
+
       drawScene(activeRuntime.surface.getCanvas());
       activeRuntime.surface.flush();
+
+      // Continue animation loop if a place is selected (relation lines need animation)
+      const selectedPlaceId = props.selectedPlaceId();
+      if (selectedPlaceId) {
+        queueDraw();
+      }
     });
   };
 
@@ -192,7 +203,7 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
     const relationshipLine = new canvasKit.Paint();
     relationshipLine.setAntiAlias(true);
     relationshipLine.setStyle(canvasKit.PaintStyle.Stroke);
-    relationshipLine.setColor(canvasKit.Color(128, 128, 128, 0.4));
+    relationshipLine.setColor(canvasKit.Color(128, 128, 128, 0.4)); // Visible but subtle 40% opacity
 
     const relationshipLineHighlight = new canvasKit.Paint();
     relationshipLineHighlight.setAntiAlias(true);
@@ -259,6 +270,15 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
       return;
     }
 
+    // If no place is selected, don't draw any relation lines
+    if (!selectedPlaceId) {
+      return;
+    }
+
+    // Build place map and subtree set for filtering
+    const placeMap = buildPlaceMap(places);
+    const subtreeIds = getSubtreePlaceIds(selectedPlaceId, placeMap);
+
     for (const place of places) {
       if (place.parentPlaceId === null) {
         continue;
@@ -269,14 +289,35 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
         continue;
       }
 
-      const isHighlighted =
-        place.id === selectedPlaceId || parent.id === selectedPlaceId;
-      const paint = isHighlighted
-        ? runtime.paints.relationshipLineHighlight
-        : runtime.paints.relationshipLine;
+      // Filter: draw line only if place is selected (parent connection)
+      // OR if parent is in the selected place's subtree (descendant connection)
+      const shouldDraw =
+        place.id === selectedPlaceId || subtreeIds.has(parent.id);
 
-      paint.setStrokeWidth(2 / viewport.scale);
-      canvas.drawLine(parent.x, parent.y, place.x, place.y, paint);
+      if (!shouldDraw) {
+        continue;
+      }
+
+      // Use highlight paint for better visibility of direction indicator
+      const paint = runtime.paints.relationshipLineHighlight;
+      paint.setStrokeWidth(1 / viewport.scale);
+
+      // Apply sparse animated dash effect to show direction (parent -> child)
+      // Pattern: 6px visible pulse, 60px gap - occupies only ~9% of the line
+      const path = new runtime.canvasKit.Path();
+      path.moveTo(parent.x, parent.y);
+      path.lineTo(place.x, place.y);
+      const dashedPath = runtime.canvasKit.PathEffect.MakeDash(
+        [8, 40], // 8px dash, 40px gap - balanced pulse frequency
+        dashPhase, // animated phase offset
+      );
+      paint.setPathEffect(dashedPath);
+
+      canvas.drawPath(path, paint);
+
+      // Clean up
+      path.delete();
+      dashedPath?.delete();
     }
   };
 
