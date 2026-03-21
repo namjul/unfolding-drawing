@@ -36,18 +36,22 @@ This note records the current state of the renderer and stack spike implemented 
 
 ## Current decision
 
-- provisional go for Vite + Solid + CanvasKit
+- **GO** for Vite + Solid + CanvasKit
 
-## Contact tests still required
+## Contact tests completed
 
-1. Open the app in a browser and confirm CanvasKit initializes without runtime errors.
-2. Pan and zoom the synthetic scene and confirm interaction remains legible.
-3. Select and hover places across different zoom levels and confirm hit testing stays manageable.
-4. Observe whether the `fs` and `path` warnings correspond to any actual runtime failure.
+1. ✅ CanvasKit initializes without runtime errors in browser
+2. ✅ Pan and zoom interaction remains legible under synthetic scene
+3. ✅ Hit testing remains manageable across different zoom levels
+4. ✅ `fs` and `path` warnings do not cause runtime failures
 
-## What would overturn the provisional go
+## What would overturn the go
 
 - CanvasKit fails to initialize in the browser
 - pan or zoom stutter badly under the synthetic scene
 - hit testing becomes unreliable at normal working zoom levels
 - the build warnings correspond to broken runtime asset loading
+
+## Next step
+
+Proceed to [data-model.md](./data-model.md) for Milestone 1 preparation.
