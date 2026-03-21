@@ -6,14 +6,7 @@ import CanvasKitInit, {
 } from 'canvaskit-wasm';
 import canvaskitWasmUrl from 'canvaskit-wasm/bin/canvaskit.wasm?url';
 import type { Accessor, Setter } from 'solid-js';
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  For,
-  onCleanup,
-  onMount,
-} from 'solid-js';
+import { createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import type {
   AwaitingTransformationTarget,
   DisplayPlace,
@@ -23,7 +16,7 @@ import type {
 import type { PlaceId } from '../lib/evolu-db';
 import { hitTestPlace } from './hitTest';
 import { buildPlaceMap, getSubtreePlaceIds } from './parent-objects';
-import { getPlaceLabel } from './scene';
+
 import { screenToWorld, type Viewport, zoomViewportAt } from './viewport';
 
 interface PaintSet {
@@ -89,27 +82,6 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
 
   const [status, setStatus] = createSignal('Loading CanvasKit...');
   const [canvasSize, setCanvasSize] = createSignal({ width: 0, height: 0 });
-
-  const visibleLabels = createMemo(() => {
-    const currentViewport = props.viewport();
-    const size = canvasSize();
-
-    return props
-      .places()
-      .map((place, index) => ({
-        id: place.id,
-        label: getPlaceLabel(place, index),
-        left: place.x * currentViewport.scale + currentViewport.x,
-        top: place.y * currentViewport.scale + currentViewport.y,
-      }))
-      .filter(
-        (label) =>
-          label.left >= -80 &&
-          label.left <= size.width + 80 &&
-          label.top >= -40 &&
-          label.top <= size.height + 40,
-      );
-  });
 
   const queueDraw = () => {
     if (!runtime || drawQueued) {
@@ -723,22 +695,6 @@ const PlaceCanvas = (props: PlaceCanvasProps) => {
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
         />
-
-        <div class="pointer-events-none absolute inset-0">
-          <For each={visibleLabels()}>
-            {(label) => (
-              <div
-                class="absolute -translate-x-1/2 rounded-full border border-white/10 bg-slate-950/80 px-2 py-1 text-[11px] tracking-[0.18em] text-slate-200 shadow-[0_8px_20px_rgba(0,0,0,0.3)]"
-                style={{
-                  left: `${label.left}px`,
-                  top: `${label.top}px`,
-                }}
-              >
-                {label.label}
-              </div>
-            )}
-          </For>
-        </div>
       </div>
     </section>
   );
