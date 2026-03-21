@@ -1,6 +1,6 @@
 import type { Setter } from 'solid-js';
 import { createSignal } from 'solid-js';
-import { buildPlaceMap, computeWorldPosition } from './canvas/hierarchy';
+import { buildPlaceMap, computeWorldPosition } from './canvas/parent-objects';
 import type { Viewport } from './canvas/viewport';
 import type { PersistedPlace } from './drawing/types';
 import {

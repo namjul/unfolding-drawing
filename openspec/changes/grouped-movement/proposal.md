@@ -28,7 +28,7 @@ Parent-child relationships in Stage 2 currently only provide visual connection t
 ## Impact
 
 **Affected modules:**
-- `src/canvas/hierarchy.ts` (new) - Shared utilities for world position computation and hierarchy traversal
+- `src/canvas/parent-objects.ts` (new) - Shared utilities for world position computation and parent-child traversal
 - `src/canvas/scene.ts` - World position derivation in `deriveDisplayPlaces()`, grouped movement preview
 - `src/interaction-state.ts` - Offset calculation when staging related places and moves
 - `src/drawing-ops.ts` - Offset storage when committing moves, cascade delete logic

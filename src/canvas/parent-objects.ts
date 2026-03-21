@@ -9,7 +9,7 @@ type PlaceLike = {
 };
 
 /**
- * Build a lookup map from place ID to place for efficient hierarchy traversal.
+ * Build a lookup map from place ID to place for efficient parent-child traversal.
  */
 export const buildPlaceMap = (
   places: ReadonlyArray<PersistedPlace>,

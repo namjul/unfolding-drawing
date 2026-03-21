@@ -8,7 +8,7 @@ import {
   calculateDelta,
   computeWorldPosition,
   isDescendantOf,
-} from './hierarchy';
+} from './parent-objects';
 
 export interface SceneBounds {
   minX: number;

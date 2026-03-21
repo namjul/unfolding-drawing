@@ -230,13 +230,14 @@ const handleStageMovePlace = (placeId: PlaceId, x: number, y: number) => {
 
 ### Decision 7: Shared Utility Location
 
-**Chosen:** Create `src/canvas/hierarchy.ts` for shared hierarchy utilities (`computeWorldPosition`, `buildPlaceMap`, `isDescendantOf`).
+**Chosen:** Create `src/canvas/parent-objects.ts` for shared parent-object utilities (`computeWorldPosition`, `buildPlaceMap`, `isDescendantOf`).
 
 **Rationale:**
 - Three modules need these functions (scene.ts, interaction-state.ts, drawing-ops.ts)
-- Single source of truth for hierarchy logic
-- Clear module purpose: hierarchy traversal and computation
+- Single source of truth for parent-child relationship logic
+- Clear module purpose: parent-object traversal and coordinate computation
 - Located in canvas/ since it's display-related (not persistence)
+- Filename aligns with glossary term "Parent Drawing Object"
 
 **Alternative considered:** Put in `src/drawing/` module.
 - **Rejected:** More about display/computation than persistence

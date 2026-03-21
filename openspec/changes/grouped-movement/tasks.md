@@ -1,18 +1,18 @@
-## 1. Shared Hierarchy Utilities
+## 1. Shared Parent Objects Utilities
 
-- [x] 1.1 Create `src/canvas/hierarchy.ts` module file
+- [x] 1.1 Create `src/canvas/parent-objects.ts` module file
 - [x] 1.2 Implement `buildPlaceMap()` helper to create Map from places array
 - [x] 1.3 Implement `computeWorldPosition()` recursive function for position calculation
   - **Note:** Uses dual interpretation: roots use world coords, children use offsets
   - Includes cycle detection and orphan fallback
-- [x] 1.4 Implement `isDescendantOf()` helper for hierarchy traversal
+- [x] 1.4 Implement `isDescendantOf()` helper for parent-child traversal
   - Includes cycle detection to prevent infinite loops
 - [x] 1.5 Implement `getDescendants()` helper to get all descendants of a place
 - [x] 1.6 Add explicit comments explaining coordinate semantics (root vs child)
 
 ## 2. Display Layer - World Position Computation
 
-- [x] 2.1 Import hierarchy utilities in `src/canvas/scene.ts`
+- [x] 2.1 Import parent-objects utilities in `src/canvas/scene.ts`
 - [x] 2.2 Modify `deriveDisplayPlaces()` to build place map
 - [x] 2.3 Update place mapping to compute world positions using `computeWorldPosition()`
 - [x] 2.4 Add `case 'addRelatedPlace'` to handle draft related places with offset → world conversion
@@ -22,7 +22,7 @@
 
 ## 3. Interaction Layer - Offset Calculation for Staging
 
-- [x] 3.1 Import hierarchy utilities in `src/interaction-state.ts`
+- [x] 3.1 Import parent-objects utilities in `src/interaction-state.ts`
 - [x] 3.2 Add `places` parameter to `stageAddRelatedPlace()` signature in InteractionState interface
 - [x] 3.3 Modify `stageAddRelatedPlace()` implementation to accept places parameter
 - [x] 3.4 In `stageAddRelatedPlace()`, build place map and compute parent's world position
@@ -35,7 +35,7 @@
 
 ## 4. Operations Layer - Offset Storage and Cascade Delete
 
-- [x] 4.1 Import hierarchy utilities in `src/drawing-ops.ts`
+- [x] 4.1 Import parent-objects utilities in `src/drawing-ops.ts`
 - [x] 4.2 Modify `commitPending()` for `movePlace` case to detect if place has parent
 - [x] 4.3 If moving child, compute parent's world position and convert target to offset before storing
 - [x] 4.4 If moving root, store world position directly (no conversion)

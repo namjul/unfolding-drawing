@@ -4,7 +4,7 @@ import {
   buildPlaceMap,
   computeWorldPosition,
   getDescendants,
-} from './canvas/hierarchy';
+} from './canvas/parent-objects';
 import type {
   PersistedPlace,
   TransformationEntry,
